@@ -1,0 +1,84 @@
+auth_enabled: true  # Включает multi-tenancy и необходимость заголовка X-Scope-OrgID для запросов
+
+server:
+  http_listen_address: 0.0.0.0
+  http_listen_port: 3100  # HTTP порт Loki (query/push/ready)
+  grpc_listen_address: 0.0.0.0
+  grpc_listen_port: 9095  # gRPC порт Loki (внутренние компоненты/клиенты)
+  log_level: ${LOKI_LOG_LEVEL}        # Уровень логов Loki (снижает шум в проде)
+
+common:
+  path_prefix: /loki      # Базовая директория данных Loki в контейнере
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks  # Хранилище чанков логов (filesystem backend)
+      rules_directory: /loki/rules    # Директория для правил (recording/alerting)
+  replication_factor: 1   # Репликация для single-node (для кластера обычно >1)
+  ring:
+    instance_addr: 127.0.0.1
+    instance_id: loki-central
+    kvstore:
+      store: inmemory     # kvstore кольца в памяти (подходит для single-node)
+
+distributor:
+  ring:
+    kvstore:
+      store: inmemory
+
+# Конфигурация компонента ingester, необходимая при auth_enabled: true
+ingester:
+  lifecycler:
+    # Задаем адрес и ID для инстанса в режиме all-in-one
+    address: 127.0.0.1
+    id: loki-central
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    final_sleep: 0s
+  # WAL (Write-Ahead Log) включен по умолчанию для индекса tsdb
+  wal:
+    enabled: true
+    dir: /loki/wal
+
+# Конфигурация компонента ruler
+ruler:
+  alertmanager_url: http://localhost:9093 # URL Alertmanager (даже если не используется, лучше указать)
+  storage:
+    type: local
+    local:
+      directory: /loki/rules
+  rule_path: /loki/rules_temp # Временная директория для правил
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24    # Дата начала действия схемы индекса
+      store: tsdb         # Тип индекса (tsdb)
+      object_store: filesystem  # Backend для object store (локальная ФС)
+      schema: v13         # Версия схемы Loki
+      index:
+        prefix: loki_index_  # Префикс файлов индекса
+        period: 24h          # Период ротации индекса
+
+storage_config:
+  filesystem:
+    directory: /loki/chunks
+  tsdb_shipper:
+    active_index_directory: /loki/index       # Активный индекс на диске
+    cache_location: /loki/index_cache         # Кэш индекса для ускорения запросов
+    cache_ttl: 24h                            # TTL кэша индекса
+
+compactor:
+  working_directory: /loki/compactor          # Рабочая директория компактора
+  compaction_interval: 10m                    # Интервал запуска компакции
+  retention_enabled: true                     # Включение удаления по retention
+  delete_request_store: filesystem            # Где хранить запросы удаления (локальная ФС)
+
+limits_config:
+  retention_period: 2160h  # 90 days          # Retention логов (в часах)
+  max_query_lookback: 2160h  # 90 days        # Максимальная глубина запросов назад
+  shard_streams:
+    enabled: false

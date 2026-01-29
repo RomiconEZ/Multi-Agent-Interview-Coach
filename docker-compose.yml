@@ -1,0 +1,44 @@
+services:
+  backend:
+    container_name: "${COMPOSE_PROJECT_NAME}-backend"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    expose:
+      - "${BACKEND_PORT}"
+    depends_on:
+      - redis_cache
+    volumes:
+      - ./src/app:/code/app
+      - ./.env:/code/.env
+    restart: on-failure:3
+    networks: [ internal ]
+
+  redis_cache:
+    image: redis:alpine
+    container_name: "${COMPOSE_PROJECT_NAME}-redis-cache"
+    volumes: [ redis-cache-data:/data ]
+    expose:
+      - "${REDIS_CACHE_PORT}"
+    restart: on-failure:3
+    networks: [ internal ]
+
+  nginx:
+    container_name: "${COMPOSE_PROJECT_NAME}-nginx"
+    image: nginx:latest
+    ports:
+      - "${NGINX_EXTERNAL_PORT}:80"
+    volumes:
+      - ./default.conf:/etc/nginx/conf.d/default.conf
+    depends_on: [ backend ]
+    restart: on-failure:3
+    networks: [ internal ]
+
+volumes:
+  redis-cache-data:
+
+networks:
+  internal:
+    driver: bridge

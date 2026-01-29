@@ -1,0 +1,130 @@
+default_language_version:
+  python: python3.11
+  node: 18.17.1
+
+repos:
+  # General hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-xml
+      - id: check-added-large-files
+        args: ["--maxkb=2000"]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: debug-statements
+      - id: requirements-txt-fixer
+
+  # Python formatting and linting
+  - repo: https://github.com/psf/black
+    rev: 23.9.1
+    hooks:
+      - id: black
+        language_version: python3.11
+        args: ["--config=pyproject.toml"]
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--settings-path=pyproject.toml"]
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.0
+    hooks:
+      - id: flake8
+        additional_dependencies:
+          - flake8-bugbear
+          - flake8-comprehensions
+          - flake8-docstrings
+          - flake8-string-format
+          - flake8-builtins
+          - flake8-spellcheck
+          - flake8-variables-names
+          - flake8-quotes
+          - flake8-pyproject
+
+  # Type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        args: ["--install-types", "--non-interactive"]
+        additional_dependencies:
+          - pydantic
+          - fastapi
+          - httpx
+
+  # Jupyter Notebook formatting and linting
+  - repo: https://github.com/nbQA-dev/nbQA
+    rev: 1.7.0
+    hooks:
+      - id: nbqa-black
+        additional_dependencies: [black==23.12.1]
+      - id: nbqa-isort
+        additional_dependencies: [isort==5.13.2]
+      - id: nbqa-flake8
+        additional_dependencies: [flake8==7.1.0]
+      - id: nbqa-mypy
+        additional_dependencies: [mypy==1.8.0]
+
+  # JavaScript/React formatting and linting
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.0.0
+    hooks:
+      - id: prettier
+        types: [javascript, jsx, ts, tsx, css, html, json, yaml, markdown]
+        additional_dependencies:
+          - "prettier@3.0.0"
+          - "prettier-plugin-tailwindcss@0.5.11"
+          - "@prettier/plugin-xml@3.0.0"
+
+  # ESLint for JavaScript/TypeScript
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v8.50.0
+    hooks:
+      - id: eslint
+        files: \.(js|jsx|ts|tsx)$
+        additional_dependencies:
+          - eslint@8.50.0
+          - eslint-config-airbnb@19.0.4
+          - eslint-plugin-import@2.29.1
+          - eslint-plugin-jsx-a11y@6.7.1
+          - eslint-plugin-react@7.33.2
+          - eslint-plugin-react-hooks@4.6.0
+          - "@babel/core@7.23.7"
+          - "@babel/eslint-parser@7.23.3"
+
+  # Local hooks
+  - repo: local
+    hooks:
+      # Docker Compose Validation
+#      - id: docker-compose-check
+#        name: Docker Compose Check
+#        entry: docker-compose -f docker-compose.yml config
+#        language: system
+#        files: docker-compose\.yml$
+#        pass_filenames: false
+      - id: docker-compose-airflow-check
+        name: Docker Compose Airflow Check
+        entry: docker compose -f airflow/docker-compose-airflow.yml config
+        language: system
+        files: airflow/docker-compose-airflow\.yml$
+        pass_filenames: false
+
+ci:
+  autofix_commit_msg: "🎨 [pre-commit.ci] Auto format"
+  autoupdate_commit_msg: "⬆️ [pre-commit.ci] pre-commit autoupdate"
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false

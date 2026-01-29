@@ -1,0 +1,47 @@
+# Python backend
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+*.log
+
+# Distribution / packaging
+.build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+*.whl
+
+# Testing
+.coverage
+.coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.pytest_cache/
+.tox/
+.nox/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose*
+Dockerfile*
+.dockerignore
+
+# Documentation
+docs/_build/
