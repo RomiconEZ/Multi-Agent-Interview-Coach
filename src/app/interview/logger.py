@@ -56,7 +56,7 @@ class InterviewLogger:
         with filepath.open("w", encoding="utf-8") as f:
             json.dump(log_data.model_dump(), f, ensure_ascii=False, indent=2)
 
-        logger.info(f"Interview log saved to {filepath}")
+        logger.info(f"Interview log saved: path={filepath}")
         return filepath
 
     def save_raw_log(
@@ -75,17 +75,6 @@ class InterviewLogger:
         filename = f"interview_detailed_{timestamp}.json"
         filepath = self._log_dir / filename
 
-        turns_data: list[dict[str, Any]] = []
-        for turn in state.turns:
-            turn_dict: dict[str, Any] = {
-                "turn_id": turn.turn_id,
-                "agent_visible_message": turn.agent_visible_message,
-                "user_message": turn.user_message,
-                "internal_thoughts": [t.to_log_dict() for t in turn.internal_thoughts],
-                "timestamp": turn.timestamp.isoformat(),
-            }
-            turns_data.append(turn_dict)
-
         log_data: dict[str, Any] = {
             "participant_name": state.participant_name,
             "candidate_info": {
@@ -102,14 +91,14 @@ class InterviewLogger:
                 "knowledge_gaps": state.knowledge_gaps,
                 "covered_topics": state.covered_topics,
             },
-            "turns": turns_data,
+            "turns": [turn.to_detailed_log_dict() for turn in state.turns],
             "final_feedback": feedback.model_dump() if feedback else None,
         }
 
         with filepath.open("w", encoding="utf-8") as f:
             json.dump(log_data, f, ensure_ascii=False, indent=2, default=str)
 
-        logger.info(f"Detailed interview log saved to {filepath}")
+        logger.info(f"Detailed interview log saved: path={filepath}")
         return filepath
 
 

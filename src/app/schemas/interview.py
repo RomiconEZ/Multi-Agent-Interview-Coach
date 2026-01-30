@@ -64,6 +64,10 @@ class InternalThought(BaseModel):
     def to_log_dict(self) -> dict[str, str]:
         return {"from": self.from_agent, "to": self.to_agent, "content": self.content}
 
+    def to_log_string(self) -> str:
+        """Форматирует мысль агента в строку для основного лога."""
+        return f"[{self.from_agent}]: {self.content}\n"
+
 
 class ResponseType(str, Enum):
     """Тип ответа пользователя."""
@@ -146,15 +150,28 @@ class InterviewTurn(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
     def to_log_dict(self) -> dict[str, object]:
-        thoughts_list: list[dict[str, str]] = [
-            {"from": t.from_agent, "to": t.to_agent, "content": t.content}
-            for t in self.internal_thoughts
-        ]
+        """
+        Преобразует ход в словарь для основного лога.
+
+        internal_thoughts форматируется как строка:
+        [agent_name]: <thought>\n[agent_name]: <thought>\n
+        """
+        thoughts_str = "".join(t.to_log_string() for t in self.internal_thoughts)
         return {
             "turn_id": self.turn_id,
             "agent_visible_message": self.agent_visible_message,
             "user_message": self.user_message or "",
-            "internal_thoughts": thoughts_list,
+            "internal_thoughts": thoughts_str,
+        }
+
+    def to_detailed_log_dict(self) -> dict[str, object]:
+        """Преобразует ход в словарь для детального лога."""
+        return {
+            "turn_id": self.turn_id,
+            "agent_visible_message": self.agent_visible_message,
+            "user_message": self.user_message,
+            "internal_thoughts": [t.to_log_dict() for t in self.internal_thoughts],
+            "timestamp": self.timestamp.isoformat(),
         }
 
 
