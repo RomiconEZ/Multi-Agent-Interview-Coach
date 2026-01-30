@@ -1,3 +1,9 @@
+"""
+Точка входа FastAPI приложения.
+
+Основной файл для запуска FastAPI backend.
+"""
+
 from .api import router
 from .core.config import settings
 from .core.logger_setup import setup_logging

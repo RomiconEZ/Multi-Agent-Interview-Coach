@@ -1,0 +1,29 @@
+# --------- requirements ---------
+FROM python:3.11-slim-bookworm as requirements-stage
+
+WORKDIR /tmp
+RUN pip install poetry poetry-plugin-export
+
+COPY ./pyproject.toml ./poetry.lock* /tmp/
+RUN poetry export -f requirements.txt --output requirements.txt --without-hashes
+
+# --------- final image build ---------
+FROM python:3.11-slim-bookworm
+
+WORKDIR /code
+RUN mkdir -p /code/logs /code/interview_logs /code/.pycache
+
+ENV PYTHONPYCACHEPREFIX=/code/.pycache \
+    PYTHONUNBUFFERED=1 \
+    PYTHONOPTIMIZE=0 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+COPY --from=requirements-stage /tmp/requirements.txt /code/requirements.txt
+RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+
+COPY ./src/app /code/app
+
+EXPOSE 7860
+
+ENTRYPOINT ["python", "-m", "app.gradio_main", "--host", "0.0.0.0", "--port", "7860"]

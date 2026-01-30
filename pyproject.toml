@@ -1,12 +1,12 @@
 [tool.poetry]
-name = "doc control server"
+name = "multi-agent-interview-coach"
 version = "0.1.0"
-description = "Сервер для нормоконтроля документов"
+description = "Multi-Agent Interview Coach - система технического интервью с AI-агентами"
 authors = ["Roman Neronov <roman.nieronov@gmail.com>"]
 maintainers = ["Roman Neronov <roman.nieronov@gmail.com>"]
 readme = "README.md"
 packages = [{ include = "src" }]
-keywords = ["python", "project"]
+keywords = ["python", "ai", "interview", "agents", "llm"]
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -20,10 +20,13 @@ pydantic-settings = "^2.9.1"
 python-multipart = "^0.0.20"
 python-docx = "1.2.0"
 redis = "^5.3.0"
+gradio = "^5.0"
+nest-asyncio = "^1.6.0"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^3.6.0"
 pytest = "^7.4.4"
+pytest-asyncio = "^0.23.0"
 black = "23.12.1"
 isort = "5.13.2"
 flake8 = "7.1.0"
@@ -31,6 +34,9 @@ mypy = "1.8.0"
 pylint = "3.0.3"
 coverage = "^7.2"
 safety = "^2.3.0"
+
+[tool.poetry.scripts]
+interview-coach = "app.gradio_main:main"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
@@ -59,7 +65,7 @@ lines_between_types = 1
 combine_as_imports = true
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 known_first_party = ["src", "tests"]
-known_third_party = ["fastapi", "pydantic", "sqlalchemy", "uvicorn", "pandas", "numpy"]
+known_third_party = ["fastapi", "pydantic", "sqlalchemy", "uvicorn", "pandas", "numpy", "gradio", "httpx"]
 
 [tool.flake8]
 max-line-length = 90
@@ -99,6 +105,7 @@ minversion = "7.0"
 addopts = "-ra -q --cov=src --cov-report=term-missing"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+asyncio_mode = "auto"
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::UserWarning"

@@ -1,4 +1,20 @@
 services:
+  interview-coach:
+    container_name: "${COMPOSE_PROJECT_NAME}-gradio"
+    build:
+      context: .
+      dockerfile: Dockerfile.gradio
+    env_file:
+      - .env
+    ports:
+      - "${GRADIO_PORT:-7860}:7860"
+    volumes:
+      - ./src/app:/code/app
+      - ./.env:/code/.env
+      - interview-logs:/code/interview_logs
+    restart: on-failure:3
+    networks: [ internal ]
+
   backend:
     container_name: "${COMPOSE_PROJECT_NAME}-backend"
     build:
@@ -38,6 +54,7 @@ services:
 
 volumes:
   redis-cache-data:
+  interview-logs:
 
 networks:
   internal:

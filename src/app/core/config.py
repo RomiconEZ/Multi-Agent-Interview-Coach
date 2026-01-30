@@ -124,12 +124,81 @@ class LogSettings(_SettingsBase):
         return self.APP_LOG_DIR / "personal.log"
 
 
+class LiteLLMSettings(_SettingsBase):
+    """
+    Настройки для подключения к LiteLLM.
+
+    :ivar LITELLM_BASE_URL: Базовый URL LiteLLM API.
+    :ivar LITELLM_API_KEY: API ключ для аутентификации (опционально).
+    :ivar LITELLM_MODEL: Имя модели по умолчанию.
+    :ivar LITELLM_TIMEOUT: Таймаут запросов в секундах.
+    :ivar LITELLM_MAX_RETRIES: Максимальное количество повторных попыток.
+    """
+
+    LITELLM_BASE_URL: str = "http://localhost:4000"
+    LITELLM_API_KEY: str = ""
+    LITELLM_MODEL: str = "gpt-4o-mini"
+    LITELLM_TIMEOUT: int = 120
+    LITELLM_MAX_RETRIES: int = 3
+
+    @field_validator("LITELLM_BASE_URL")
+    @classmethod
+    def _url_non_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("LITELLM_BASE_URL must be a non-empty string")
+        return v.strip().rstrip("/")
+
+    @field_validator("LITELLM_TIMEOUT")
+    @classmethod
+    def _timeout_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("LITELLM_TIMEOUT must be >= 1")
+        return v
+
+    @field_validator("LITELLM_MAX_RETRIES")
+    @classmethod
+    def _retries_non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("LITELLM_MAX_RETRIES must be >= 0")
+        return v
+
+
+class InterviewSettings(_SettingsBase):
+    """
+    Настройки интервью-сессии.
+
+    :ivar INTERVIEW_LOG_DIR: Директория для хранения логов интервью.
+    :ivar TEAM_NAME: Название команды для логов.
+    :ivar MAX_TURNS: Максимальное количество ходов в интервью.
+    """
+
+    INTERVIEW_LOG_DIR: Path = Field(default_factory=lambda: Path.cwd() / "interview_logs")
+    TEAM_NAME: str = "Interview Coach Team"
+    MAX_TURNS: int = 20
+
+    @field_validator("INTERVIEW_LOG_DIR")
+    @classmethod
+    def _resolve_and_create_interview_log_dir(cls, v: Path) -> Path:
+        resolved = v.resolve()
+        resolved.mkdir(parents=True, exist_ok=True)
+        return resolved
+
+    @field_validator("MAX_TURNS")
+    @classmethod
+    def _max_turns_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("MAX_TURNS must be >= 1")
+        return v
+
+
 class Settings(
     AppSettings,
     EnvironmentSettings,
     RedisCacheSettings,
     ClientSideCacheSettings,
     LogSettings,
+    LiteLLMSettings,
+    InterviewSettings,
 ):
     pass
 
