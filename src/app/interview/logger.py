@@ -49,7 +49,7 @@ class InterviewLogger:
         filepath = self._log_dir / filename
 
         log_data = InterviewLog(
-            participant_name=state.participant_name,
+            participant_name=settings.CONTACT_NAME or "Unknown",
             turns=[turn.to_log_dict() for turn in state.turns],
             final_feedback=feedback.to_formatted_string() if feedback else None,
         )
@@ -77,7 +77,7 @@ class InterviewLogger:
         filepath = self._log_dir / filename
 
         log_data: dict[str, Any] = {
-            "participant_name": state.participant_name,
+            "participant_name": settings.CONTACT_NAME or "Unknown",
             "candidate_info": {
                 "name": state.candidate.name,
                 "position": state.candidate.position,
