@@ -223,10 +223,12 @@ class InterviewerAgent(BaseAgent):
             )
 
         if response_type == ResponseType.HALLUCINATION:
+            correct = analysis.correct_answer or "информацию можно найти в официальной документации"
             return (
                 "ВАЖНО: Кандидат сказал фактически неверную информацию (галлюцинация). "
-                "Вежливо укажи на ошибку, объясни как на самом деле, "
-                "и задай уточняющий или новый вопрос по теме."
+                f"Вежливо укажи на ошибку. Скажи что-то вроде: "
+                f"'Хм, это довольно необычное утверждение. На самом деле {correct}. "
+                f"Давайте вернёмся к текущей версии Python...' и задай уточняющий вопрос."
             )
 
         if response_type == ResponseType.OFF_TOPIC:
@@ -239,8 +241,9 @@ class InterviewerAgent(BaseAgent):
 
         if response_type == ResponseType.QUESTION:
             return (
-                "Кандидат задал встречный вопрос. Ответь на него кратко и информативно, "
-                "затем продолжи интервью с новым техническим вопросом."
+                "Кандидат задал встречный вопрос. Это хороший знак вовлечённости! "
+                "Ответь на его вопрос развёрнуто и информативно (это важно для оценки!), "
+                "затем плавно продолжи интервью с новым техническим вопросом."
             )
 
         if response_type == ResponseType.INCOMPLETE:
@@ -289,17 +292,17 @@ class InterviewerAgent(BaseAgent):
 
     def _generate_thought(self, analysis: ObserverAnalysis) -> str:
         """Генерирует внутреннюю мысль интервьюера."""
-        thoughts_map = {
-            ResponseType.INTRODUCTION: "Кандидат представился, начинаю техническую часть.",
-            ResponseType.HALLUCINATION: "Обнаружена галлюцинация, нужно корректно указать на ошибку.",
-            ResponseType.OFF_TOPIC: "Кандидат отклонился от темы, возвращаю к интервью.",
-            ResponseType.QUESTION: "Кандидат задал вопрос, отвечу и продолжу.",
-            ResponseType.EXCELLENT: "Отличный ответ, повышаю сложность.",
-            ResponseType.INCOMPLETE: "Неполный ответ, попрошу уточнить.",
+        base_thoughts = {
+            ResponseType.INTRODUCTION: "Кандидат представился. Анализирую опыт и технологии для релевантных вопросов.",
+            ResponseType.HALLUCINATION: f"ALERT: Кандидат галлюцинирует! Нужно вежливо указать на ошибку и объяснить как на самом деле. Рекомендация: {analysis.recommendation}",
+            ResponseType.OFF_TOPIC: "Кандидат пытается сменить тему. Возвращаю к техническому интервью.",
+            ResponseType.QUESTION: "Кандидат задал встречный вопрос - хороший знак вовлечённости. Отвечу развёрнуто и продолжу.",
+            ResponseType.EXCELLENT: f"Отличный ответ! Уровень {analysis.quality.value}. Можно усложнить вопросы.",
+            ResponseType.INCOMPLETE: "Неполный или уклончивый ответ. Попрошу раскрыть тему или дам подсказку.",
         }
-        return thoughts_map.get(
+        return base_thoughts.get(
             analysis.response_type,
-            f"Продолжаю интервью, качество ответа: {analysis.quality.value}",
+            f"Анализ: качество={analysis.quality.value}, корректность={analysis.is_factually_correct}. Рекомендация: {analysis.recommendation}",
         )
 
     def _generate_fallback_response(self, analysis: ObserverAnalysis) -> str:

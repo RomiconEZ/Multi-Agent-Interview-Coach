@@ -154,15 +154,20 @@ class InterviewTurn(BaseModel):
 
     def to_log_dict(self) -> dict[str, object]:
         """Преобразует в словарь для лога по формату ТЗ."""
-        # Формат: [Observer]: ... [Interviewer]: ...
-        thoughts_str = " ".join(
-            f"[{t.from_agent}]: {t.content}" for t in self.internal_thoughts
-        )
+        # Формат: массив объектов с from, to, content
+        thoughts_list: list[dict[str, str]] = [
+            {
+                "from": t.from_agent,
+                "to": t.to_agent,
+                "content": t.content,
+            }
+            for t in self.internal_thoughts
+        ]
         return {
             "turn_id": self.turn_id,
             "agent_visible_message": self.agent_visible_message,
             "user_message": self.user_message or "",
-            "internal_thoughts": thoughts_str,
+            "internal_thoughts": thoughts_list,
         }
 
 

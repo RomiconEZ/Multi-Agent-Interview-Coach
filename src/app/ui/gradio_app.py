@@ -20,6 +20,8 @@ from ..interview import InterviewSession, create_interview_session
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
 _current_session: InterviewSession | None = None
+_last_log_path: Path | None = None
+_last_detailed_log_path: Path | None = None
 
 
 def _run_async(coro: Any) -> Any:
@@ -45,10 +47,13 @@ async def _start_interview_async(
 
     :return: Tuple (статус, очищенный инпут, история чата).
     """
-    global _current_session
+    global _current_session, _last_log_path, _last_detailed_log_path
 
     if _current_session is not None:
         await _current_session.close()
+
+    _last_log_path = None
+    _last_detailed_log_path = None
 
     model_name = model.strip() if model.strip() else None
     _current_session = await create_interview_session(model_name)
@@ -71,19 +76,19 @@ def start_interview(
 async def _send_message_async(
     message: str,
     history: list[tuple[str | None, str | None]],
-) -> tuple[str, str, list[tuple[str | None, str | None]], str, str, str]:
+) -> tuple[str, str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     """
     Асинхронно обрабатывает сообщение.
 
-    :return: Tuple (статус, очищенный инпут, история, фидбэк, путь1, путь2).
+    :return: Tuple (статус, очищенный инпут, история, фидбэк, путь_лог, путь_детальный).
     """
-    global _current_session
+    global _current_session, _last_log_path, _last_detailed_log_path
 
     if _current_session is None:
-        return "❌ Сначала начните интервью", message, history, "", "", ""
+        return "❌ Сначала начните интервью", message, history, "", None, None
 
     if not message.strip():
-        return "❌ Введите сообщение", "", history, "", "", ""
+        return "❌ Введите сообщение", "", history, "", None, None
 
     history.append((message, None))
 
@@ -94,36 +99,42 @@ async def _send_message_async(
     if is_finished:
         feedback, summary_path, detailed_path = await _current_session.generate_feedback()
         feedback_text = feedback.to_formatted_string()
+        
+        _last_log_path = summary_path
+        _last_detailed_log_path = detailed_path
 
         status = "✅ Интервью завершено. Фидбэк сгенерирован."
         return status, "", history, feedback_text, str(summary_path), str(detailed_path)
 
     status = f"✅ Ход {_current_session.state.current_turn if _current_session.state else '?'}"
-    return status, "", history, "", "", ""
+    return status, "", history, "", None, None
 
 
 def send_message(
     message: str,
     history: list[tuple[str | None, str | None]],
-) -> tuple[str, str, list[tuple[str | None, str | None]], str, str, str]:
+) -> tuple[str, str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     """Синхронная обёртка для отправки сообщения."""
     return _run_async(_send_message_async(message, history))
 
 
 async def _stop_interview_async(
     history: list[tuple[str | None, str | None]],
-) -> tuple[str, list[tuple[str | None, str | None]], str, str, str]:
+) -> tuple[str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     """Асинхронно завершает интервью."""
-    global _current_session
+    global _current_session, _last_log_path, _last_detailed_log_path
 
     if _current_session is None:
-        return "❌ Нет активного интервью", history, "", "", ""
+        return "❌ Нет активного интервью", history, "", None, None
 
     if _current_session._state:
         _current_session._state.is_active = False
 
     feedback, summary_path, detailed_path = await _current_session.generate_feedback()
     feedback_text = feedback.to_formatted_string()
+    
+    _last_log_path = summary_path
+    _last_detailed_log_path = detailed_path
 
     history.append(("Стоп интервью", "Интервью завершено. Формирую фидбэк..."))
 
@@ -132,9 +143,25 @@ async def _stop_interview_async(
 
 def stop_interview(
     history: list[tuple[str | None, str | None]],
-) -> tuple[str, list[tuple[str | None, str | None]], str, str, str]:
+) -> tuple[str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     """Синхронная обёртка для остановки интервью."""
     return _run_async(_stop_interview_async(history))
+
+
+def download_main_log() -> str | None:
+    """Возвращает путь к основному логу для скачивания."""
+    global _last_log_path
+    if _last_log_path and _last_log_path.exists():
+        return str(_last_log_path)
+    return None
+
+
+def download_detailed_log() -> str | None:
+    """Возвращает путь к детальному логу для скачивания."""
+    global _last_detailed_log_path
+    if _last_detailed_log_path and _last_detailed_log_path.exists():
+        return str(_last_detailed_log_path)
+    return None
 
 
 def create_gradio_interface() -> gr.Blocks:
@@ -212,13 +239,19 @@ def create_gradio_interface() -> gr.Blocks:
                 )
 
             with gr.Column():
-                gr.Markdown("### 📁 Файлы логов")
-                summary_path_output = gr.Textbox(
-                    label="Путь к interview_log.json",
+                gr.Markdown("### 📁 Скачать логи")
+                
+                # Скрытые поля для хранения путей
+                log_path_state = gr.State(value=None)
+                detailed_log_path_state = gr.State(value=None)
+                
+                # Файлы для скачивания
+                main_log_file = gr.File(
+                    label="📄 Основной лог (interview_log.json)",
                     interactive=False,
                 )
-                detailed_path_output = gr.Textbox(
-                    label="Путь к детальному логу",
+                detailed_log_file = gr.File(
+                    label="📄 Детальный лог",
                     interactive=False,
                 )
 
@@ -232,19 +265,19 @@ def create_gradio_interface() -> gr.Blocks:
         send_btn.click(
             fn=send_message,
             inputs=[msg_input, chatbot],
-            outputs=[status_output, msg_input, chatbot, feedback_output, summary_path_output, detailed_path_output],
+            outputs=[status_output, msg_input, chatbot, feedback_output, main_log_file, detailed_log_file],
         )
 
         msg_input.submit(
             fn=send_message,
             inputs=[msg_input, chatbot],
-            outputs=[status_output, msg_input, chatbot, feedback_output, summary_path_output, detailed_path_output],
+            outputs=[status_output, msg_input, chatbot, feedback_output, main_log_file, detailed_log_file],
         )
 
         stop_btn.click(
             fn=stop_interview,
             inputs=[chatbot],
-            outputs=[status_output, chatbot, feedback_output, summary_path_output, detailed_path_output],
+            outputs=[status_output, chatbot, feedback_output, main_log_file, detailed_log_file],
         )
 
     return app

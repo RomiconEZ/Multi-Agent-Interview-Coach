@@ -118,6 +118,9 @@ class InterviewSession:
 
         # Проверка на команду остановки
         if analysis.response_type == ResponseType.STOP_COMMAND:
+            # Записываем thoughts даже при остановке
+            if self._state.turns:
+                self._state.turns[-1].internal_thoughts = list(analysis.thoughts)
             self._state.is_active = False
             return "Завершаю интервью и формирую фидбэк...", True
 
