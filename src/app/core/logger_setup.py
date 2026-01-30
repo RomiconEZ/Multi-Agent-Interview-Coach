@@ -9,19 +9,9 @@ from typing import Final
 
 from .config import settings
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Глобальные константы, вычисляемые из централизованной конфигурации
-# ──────────────────────────────────────────────────────────────────────────────
 APP_TIMEZONE: Final[timezone] = timezone(timedelta(hours=settings.APP_TZ_OFFSET))
-"""
-Часовой пояс приложения для временных меток в логах.
-Вычисляется на основе настройки APP_TZ_OFFSET из конфигурации.
-"""
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Форматтеры и фильтры
-# ──────────────────────────────────────────────────────────────────────────────
 class TZFormatter(logging.Formatter):
     """
     Форматтер, выставляющий время в заданном часовом поясе.
@@ -42,7 +32,6 @@ class ConsoleTZFormatter(TZFormatter):
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        # Обеспечиваем наличие поля log_type для внешних библиотек
         if not hasattr(record, "log_type"):
             record.log_type = "EXTERNAL"
         elif record.log_type == "PERSONAL":
@@ -70,28 +59,18 @@ class PersonalLogFilter(logging.Filter):
         return getattr(record, "log_type", None) == "PERSONAL"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Форматы логов
-# ──────────────────────────────────────────────────────────────────────────────
-SYSTEM_LOG_FORMAT: Final[str] = (
-    "%(asctime)s - %(levelname)s - %(log_type)s - %(message)s"
-)
-PERSONAL_LOG_FORMAT: Final[str] = (
-    "%(asctime)s - %(levelname)s - %(log_type)s ID:%(id)s - %(message)s"
-)
+SYSTEM_LOG_FORMAT: Final[str] = "%(asctime)s - %(levelname)s - %(log_type)s - %(message)s"
+PERSONAL_LOG_FORMAT: Final[str] = "%(asctime)s - %(levelname)s - %(log_type)s ID:%(id)s - %(message)s"
 CONSOLE_FORMAT: Final[str] = "%(asctime)s - %(levelname)s - %(log_type)s - %(message)s"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Вспомогательные функции
-# ──────────────────────────────────────────────────────────────────────────────
 def _create_file_handler(
-    path: Path,
-    level: int,
-    log_format: str,
-    log_filter: logging.Filter,
-    max_bytes: int,
-    backup_count: int,
+        path: Path,
+        level: int,
+        log_format: str,
+        log_filter: logging.Filter,
+        max_bytes: int,
+        backup_count: int,
 ) -> RotatingFileHandler:
     """
     Создаёт RotatingFileHandler с заданными параметрами.
@@ -125,9 +104,7 @@ def _clear_handlers(logger: logging.Logger) -> None:
         handler.close()
 
 
-def _attach_handlers(
-    logger: logging.Logger, handlers: Iterable[logging.Handler]
-) -> None:
+def _attach_handlers(logger: logging.Logger, handlers: Iterable[logging.Handler]) -> None:
     """
     Добавляет обработчики к логгеру.
     """
@@ -141,22 +118,19 @@ def set_external_loggers_levels() -> None:
     Также отключает propagate, чтобы сообщения не всплывали в root при DEBUG.
     """
     for name in (
-        "multipart.multipart",
-        "python_multipart.multipart",
-        "urllib3",
-        "urllib3.connectionpool",
-        "httpx",
-        "httpcore",
-        "anyio",
+            "multipart.multipart",
+            "python_multipart.multipart",
+            "urllib3",
+            "urllib3.connectionpool",
+            "httpx",
+            "httpcore",
+            "anyio",
     ):
         lg = logging.getLogger(name)
         lg.setLevel(logging.WARNING)
         lg.propagate = False
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Основная точка входа
-# ──────────────────────────────────────────────────────────────────────────────
 def setup_logging(force_reconfigure: bool = False) -> None:
     """
     Настраивает корневой логгер и три обработчика:
@@ -197,9 +171,7 @@ def setup_logging(force_reconfigure: bool = False) -> None:
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.DEBUG)
-    console_handler.setFormatter(
-        ConsoleTZFormatter(CONSOLE_FORMAT, "%Y-%m-%d %H:%M:%S")
-    )
+    console_handler.setFormatter(ConsoleTZFormatter(CONSOLE_FORMAT, "%Y-%m-%d %H:%M:%S"))
 
     _attach_handlers(root_logger, (system_handler, personal_handler, console_handler))
     set_external_loggers_levels()
@@ -207,9 +179,6 @@ def setup_logging(force_reconfigure: bool = False) -> None:
     get_system_logger(__name__).info("System logging configured.")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Адаптеры логгеров
-# ──────────────────────────────────────────────────────────────────────────────
 def get_system_logger(name: str) -> logging.LoggerAdapter[logging.Logger]:
     """
     Возвращает адаптер для системных логов.
@@ -221,10 +190,7 @@ def get_system_logger(name: str) -> logging.LoggerAdapter[logging.Logger]:
     return logging.LoggerAdapter(base_logger, {"log_type": "SYSTEM"})
 
 
-def get_personal_logger(
-    request_id: str | None,
-    name: str,
-) -> logging.LoggerAdapter[logging.Logger]:
+def get_personal_logger(request_id: str | None, name: str) -> logging.LoggerAdapter[logging.Logger]:
     """
     Возвращает адаптер для персональных логов.
 

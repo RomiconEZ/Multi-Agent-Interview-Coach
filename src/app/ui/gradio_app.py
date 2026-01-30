@@ -1,7 +1,5 @@
 """
 Gradio интерфейс для Multi-Agent Interview Coach.
-
-Предоставляет веб-интерфейс для проведения технических интервью.
 """
 
 from __future__ import annotations
@@ -25,7 +23,6 @@ _last_detailed_log_path: Path | None = None
 
 
 def _run_async(coro: Any) -> Any:
-    """Запускает корутину в синхронном контексте."""
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
@@ -39,9 +36,7 @@ def _run_async(coro: Any) -> Any:
     return loop.run_until_complete(coro)
 
 
-async def _start_interview_async(
-    model: str,
-) -> tuple[str, str, list[tuple[str | None, str | None]]]:
+async def _start_interview_async(model: str) -> tuple[str, str, list[tuple[str | None, str | None]]]:
     """
     Асинхронно начинает интервью.
 
@@ -66,16 +61,14 @@ async def _start_interview_async(
     return status, "", history
 
 
-def start_interview(
-    model: str,
-) -> tuple[str, str, list[tuple[str | None, str | None]]]:
+def start_interview(model: str) -> tuple[str, str, list[tuple[str | None, str | None]]]:
     """Синхронная обёртка для старта интервью."""
     return _run_async(_start_interview_async(model))
 
 
 async def _send_message_async(
-    message: str,
-    history: list[tuple[str | None, str | None]],
+        message: str,
+        history: list[tuple[str | None, str | None]],
 ) -> tuple[str, str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     """
     Асинхронно обрабатывает сообщение.
@@ -99,7 +92,12 @@ async def _send_message_async(
     if is_finished:
         feedback, summary_path, detailed_path = await _current_session.generate_feedback()
         feedback_text = feedback.to_formatted_string()
-        
+
+        # Добавляем метрики токенов
+        metrics = _current_session.get_session_metrics()
+        if metrics:
+            feedback_text += "\n\n" + metrics.to_summary_string()
+
         _last_log_path = summary_path
         _last_detailed_log_path = detailed_path
 
@@ -111,15 +109,15 @@ async def _send_message_async(
 
 
 def send_message(
-    message: str,
-    history: list[tuple[str | None, str | None]],
+        message: str,
+        history: list[tuple[str | None, str | None]],
 ) -> tuple[str, str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     """Синхронная обёртка для отправки сообщения."""
     return _run_async(_send_message_async(message, history))
 
 
 async def _stop_interview_async(
-    history: list[tuple[str | None, str | None]],
+        history: list[tuple[str | None, str | None]],
 ) -> tuple[str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     """Асинхронно завершает интервью."""
     global _current_session, _last_log_path, _last_detailed_log_path
@@ -132,7 +130,12 @@ async def _stop_interview_async(
 
     feedback, summary_path, detailed_path = await _current_session.generate_feedback()
     feedback_text = feedback.to_formatted_string()
-    
+
+    # Добавляем метрики токенов
+    metrics = _current_session.get_session_metrics()
+    if metrics:
+        feedback_text += "\n\n" + metrics.to_summary_string()
+
     _last_log_path = summary_path
     _last_detailed_log_path = detailed_path
 
@@ -142,38 +145,13 @@ async def _stop_interview_async(
 
 
 def stop_interview(
-    history: list[tuple[str | None, str | None]],
+        history: list[tuple[str | None, str | None]],
 ) -> tuple[str, list[tuple[str | None, str | None]], str, str | None, str | None]:
-    """Синхронная обёртка для остановки интервью."""
     return _run_async(_stop_interview_async(history))
 
 
-def download_main_log() -> str | None:
-    """Возвращает путь к основному логу для скачивания."""
-    global _last_log_path
-    if _last_log_path and _last_log_path.exists():
-        return str(_last_log_path)
-    return None
-
-
-def download_detailed_log() -> str | None:
-    """Возвращает путь к детальному логу для скачивания."""
-    global _last_detailed_log_path
-    if _last_detailed_log_path and _last_detailed_log_path.exists():
-        return str(_last_detailed_log_path)
-    return None
-
-
 def create_gradio_interface() -> gr.Blocks:
-    """
-    Создаёт Gradio интерфейс.
-
-    :return: Gradio Blocks приложение.
-    """
-    with gr.Blocks(
-        title="Multi-Agent Interview Coach",
-        theme=gr.themes.Soft(),
-    ) as app:
+    with gr.Blocks(title="Multi-Agent Interview Coach", theme=gr.themes.Soft()) as app:
         gr.Markdown(
             """
             # 🎯 Multi-Agent Interview Coach
@@ -182,9 +160,7 @@ def create_gradio_interface() -> gr.Blocks:
             - **Observer Agent** — анализирует ответы, выявляет галлюцинации
             - **Interviewer Agent** — ведёт диалог, адаптирует сложность
             - **Evaluator Agent** — формирует финальный фидбэк
-            
-            ---
-            
+
             **Как использовать:**
             1. Нажмите "🚀 Начать интервью"
             2. Представьтесь (имя, позиция, опыт)
@@ -206,19 +182,12 @@ def create_gradio_interface() -> gr.Blocks:
                 start_btn = gr.Button("🚀 Начать интервью", variant="primary")
                 stop_btn = gr.Button("🛑 Завершить и получить фидбэк", variant="stop")
 
-                status_output = gr.Textbox(
-                    label="Статус",
-                    interactive=False,
-                )
+                status_output = gr.Textbox(label="Статус", interactive=False)
 
             with gr.Column(scale=2):
                 gr.Markdown("### 💬 Диалог")
 
-                chatbot = gr.Chatbot(
-                    label="Интервью",
-                    height=400,
-                    type="tuples",
-                )
+                chatbot = gr.Chatbot(label="Интервью", height=400, type="tuples")
 
                 with gr.Row():
                     msg_input = gr.Textbox(
@@ -232,30 +201,14 @@ def create_gradio_interface() -> gr.Blocks:
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### 📊 Финальный фидбэк")
-                feedback_output = gr.Textbox(
-                    label="Фидбэк",
-                    lines=20,
-                    interactive=False,
-                )
+                feedback_output = gr.Textbox(label="Фидбэк", lines=20, interactive=False)
 
             with gr.Column():
                 gr.Markdown("### 📁 Скачать логи")
-                
-                # Скрытые поля для хранения путей
-                log_path_state = gr.State(value=None)
-                detailed_log_path_state = gr.State(value=None)
-                
-                # Файлы для скачивания
-                main_log_file = gr.File(
-                    label="📄 Основной лог (interview_log.json)",
-                    interactive=False,
-                )
-                detailed_log_file = gr.File(
-                    label="📄 Детальный лог",
-                    interactive=False,
-                )
 
-        # Обработчики событий
+                main_log_file = gr.File(label="📄 Основной лог", interactive=False)
+                detailed_log_file = gr.File(label="📄 Детальный лог", interactive=False)
+
         start_btn.click(
             fn=start_interview,
             inputs=[model_input],
@@ -284,9 +237,9 @@ def create_gradio_interface() -> gr.Blocks:
 
 
 def launch_app(
-    server_name: str = "0.0.0.0",
-    server_port: int = 7860,
-    share: bool = False,
+        server_name: str = "0.0.0.0",
+        server_port: int = 7860,
+        share: bool = False,
 ) -> None:
     """
     Запускает Gradio приложение.
@@ -299,8 +252,4 @@ def launch_app(
     logger.info(f"Launching Gradio app on {server_name}:{server_port}")
 
     app = create_gradio_interface()
-    app.launch(
-        server_name=server_name,
-        server_port=server_port,
-        share=share,
-    )
+    app.launch(server_name=server_name, server_port=server_port, share=share)

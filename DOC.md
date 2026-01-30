@@ -13,6 +13,9 @@
 
 Интеграция с LLM выполняется через LiteLLM proxy, запросы идут на OpenAI-compatible endpoint `/v1/chat/completions`.
 
+Дополнительно используется Langfuse (self-hosted / локальный) для observability: трекинг трейсов интервью,
+LLM generation, ошибок и метрик токенов.
+
 ---
 
 ## 2. Компоненты и ответственность
@@ -25,7 +28,8 @@
 - создание UI (chatbot, input, кнопки start/stop, вывод фидбэка),
 - запуск/остановка интервью-сессии,
 - синхронные обёртки вокруг async-логики (`_run_async`),
-- выдача ссылок на сохранённые логи через `gr.File`.
+- выдача ссылок на сохранённые логи через `gr.File`,
+- отображение метрик токенов в финальном фидбэке (добавляется после генерации фидбэка).
 
 Ключевые элементы:
 - `_current_session: InterviewSession | None`
@@ -45,24 +49,36 @@
 - последовательный вызов агентов (Observer → Interviewer → Evaluator),
 - обновление `InterviewState`,
 - адаптация сложности вопросов,
-- сохранение логов через `InterviewLogger`.
+- сохранение логов через `InterviewLogger`,
+- интеграция с Langfuse:
+  - создание trace на сессию,
+  - запись span’ов и score’ов,
+  - сбор метрик токенов и добавление их в детальный лог.
 
 Ключевые методы:
 - `start()`:
   - создаёт `InterviewState`,
+  - создаёт Langfuse trace (session_id),
   - получает приветствие через `InterviewerAgent.generate_greeting()`,
-  - создаёт `InterviewTurn`.
+  - создаёт `InterviewTurn`,
+  - пишет span `greeting`.
 - `process_message(user_message)`:
   - записывает ответ кандидата в последний `InterviewTurn`,
+  - увеличивает счётчик ходов для метрик Langfuse,
+  - пишет span `user_message`,
   - вызывает `ObserverAgent.process()` для анализа,
   - обновляет состояние (данные кандидата, темы, пробелы),
-  - корректирует `current_difficulty`,
+  - корректирует `current_difficulty` и пишет span `difficulty_change` при изменении,
   - вызывает `InterviewerAgent.process()` для генерации следующей реплики,
   - создаёт следующий `InterviewTurn`,
+  - пишет span `interviewer_response`,
   - завершает интервью по `stop_command` или `MAX_TURNS`.
 - `generate_feedback()`:
   - вызывает `EvaluatorAgent.process()`,
-  - сохраняет summary и detailed лог.
+  - пишет span `final_feedback`,
+  - добавляет финальные метрики сессии к трейсу,
+  - сохраняет summary и detailed лог,
+  - дописывает `token_metrics` в детальный лог.
 
 ---
 
@@ -81,6 +97,29 @@
 
 ---
 
+### 2.4 Observability (Langfuse)
+
+Файл: `src/app/observability/langfuse_client.py`
+
+Ответственность:
+- создание trace и generation (через SDK Langfuse),
+- сбор токен-метрик по сессии и по агентам (Observer / Interviewer / Evaluator),
+- сохранение агрегированных метрик в памяти на время жизни процесса,
+- добавление финальных метрик в trace и в детальные логи интервью.
+
+Ключевые сущности:
+- `LangfuseTracker` — фасад над Langfuse SDK.
+- `SessionMetrics` — агрегатор метрик сессии.
+- `TokenUsage` — структура для подсчёта input/output/total токенов.
+
+Где создаются метрики:
+- `LLMClient.complete(...)` — после каждого ответа обновляет `SessionMetrics.add_generation(...)`
+  через `LangfuseTracker.end_generation(..., usage=..., session_id=..., generation_name=...)`.
+- `InterviewSession.process_message(...)` — увеличивает счётчик ходов `LangfuseTracker.increment_turn(session_id)`.
+- `InterviewSession.generate_feedback(...)` — финализирует трейсы и сохраняет метрики в логи.
+
+---
+
 ## 3. Последовательность обработки (sequence)
 
 Ниже приведён детерминированный порядок действий при одном сообщении кандидата:
@@ -89,15 +128,20 @@
 Gradio UI
   └─ send_message()
       └─ InterviewSession.process_message(user_message)
+          ├─ LangfuseTracker.increment_turn(session_id)
+          ├─ LangfuseTracker.add_span(name="user_message")
           ├─ ObserverAgent.process(state, user_message, last_question)
-          │    └─ LLMClient.complete(...) -> ObserverAnalysis
+          │    └─ LLMClient.complete(...) -> ObserverAnalysis (+ generation в Langfuse)
+          ├─ LangfuseTracker.add_span(name="observer_analysis")
           ├─ InterviewSession._update_candidate_info(extracted_info)
           ├─ InterviewSession._update_state_from_analysis(analysis, user_message)
           ├─ InterviewState.adjust_difficulty(analysis)
+          │    └─ (опционально) LangfuseTracker.add_span(name="difficulty_change")
           ├─ InterviewerAgent.process(state, analysis, user_message)
-          │    └─ LLMClient.complete(...) -> (reply_text, thoughts)
+          │    └─ LLMClient.complete(...) -> (reply_text, thoughts) (+ generation в Langfuse)
           ├─ InterviewSession adds thoughts to last turn
-          └─ InterviewSession creates next InterviewTurn with interviewer message
+          ├─ InterviewSession creates next InterviewTurn with interviewer message
+          └─ LangfuseTracker.add_span(name="interviewer_response")
 ```
 
 Завершение:
@@ -196,6 +240,8 @@ Gradio UI
 - `interview_stats`: total_turns, final_difficulty, confirmed_skills, knowledge_gaps, covered_topics
 - `turns`: список ходов с `timestamp` и полным `internal_thoughts`
 - `final_feedback`: `model_dump()` объекта `InterviewFeedback` или `null`
+- `token_metrics` (добавляется после генерации фидбэка):
+  - total токены, токены по агентам, количество ходов и генераций, средние значения.
 
 ---
 
@@ -214,6 +260,43 @@ Gradio UI
 
 ---
 
+## 8.1 Langfuse интеграция (observability)
+
+### 8.1.1 Конфигурация
+
+Файл: `src/app/core/config.py`
+
+Переменные окружения:
+- `LANGFUSE_ENABLED` — включить/выключить трекинг.
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` — ключи API.
+- `LANGFUSE_HOST` — хост Langfuse:
+  - в Docker Compose: `http://langfuse:3000`,
+  - локально: обычно `http://localhost:3000`.
+
+Особенность:
+- если `LANGFUSE_ENABLED=true`, но ключи не заданы, трекинг отключается автоматически (логируется при инициализации).
+
+### 8.1.2 Trace / Generation модель
+
+- Trace создаётся на старте интервью-сессии и живёт до конца `generate_feedback()`.
+- Generation создаётся на каждый LLM вызов (Observer / Interviewer / Evaluator) с именем `generation_name`
+  (например `observer_analysis`, `interviewer_response`, `evaluator_feedback`).
+- Usage (prompt_tokens / completion_tokens / total_tokens) берётся из ответа OpenAI-compatible API (`usage`)
+  и сохраняется в `SessionMetrics`.
+
+### 8.1.3 Метрики сессии
+
+`SessionMetrics` агрегирует:
+- `total_usage` и `by_agent` (observer/interviewer/evaluator),
+- количество ходов (`turn_count`) и LLM вызовов (`generation_count`),
+- средние значения.
+
+Финализация:
+- `LangfuseTracker.add_session_metrics_to_trace(...)` добавляет span с полной структурой метрик и score’ы.
+- Метрики также сохраняются в детальный лог интервью (`token_metrics`).
+
+---
+
 ## 9. Конфигурация приложения
 
 Файл: `src/app/core/config.py`
@@ -221,7 +304,7 @@ Gradio UI
 - Используется `pydantic-settings`.
 - Настройки сгруппированы в несколько классов:
   - `AppSettings`, `EnvironmentSettings`, `RedisCacheSettings`, `ClientSideCacheSettings`,
-    `LogSettings`, `LiteLLMSettings`, `InterviewSettings`.
+    `LogSettings`, `LiteLLMSettings`, `InterviewSettings`, `LangfuseSettings`.
 - Все объединено в `Settings`, доступно как `settings = Settings()`.
 
 Особенности:
@@ -258,6 +341,19 @@ Gradio UI
 ### 11.2 Gradio
 - запуск: `python -m app.gradio_main --host 0.0.0.0 --port 7860`.
 
+### 11.3 Langfuse + PostgreSQL (self-hosted)
+
+Сервисы:
+- `langfuse-db` — PostgreSQL 15.
+- `langfuse` — Langfuse UI/API.
+
+Ключевые переменные:
+- `DATABASE_URL` — подключение к `langfuse-db`.
+- `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `SALT` — обязательные параметры рантайма Langfuse.
+
+Порт UI:
+- пробрасывается на хост: `${LANGFUSE_PORT:-3000}:3000`.
+
 ---
 
 ## 12. Безопасность и устойчивость диалога
@@ -293,6 +389,7 @@ Gradio UI
 
 - UI: старт интервью → отправка сообщения → проверка появления ответа.
 - Завершение: команда `стоп` → получение фидбэка → проверка появления файлов логов в `INTERVIEW_LOG_DIR`.
+- Langfuse: наличие trace на сессию, generation на LLM вызовы, span’ы ключевых этапов.
 - Логи приложения: наличие `system.log` и `personal.log` в `APP_LOG_DIR`.
 
 ---
@@ -306,6 +403,7 @@ Gradio UI
 | Логи интервью | `src/app/interview/logger.py` |
 | Агенты | `src/app/agents/*` |
 | LLM клиент | `src/app/llm/client.py` |
+| Observability (Langfuse) | `src/app/observability/langfuse_client.py` |
 | Конфигурация | `src/app/core/config.py` |
 | Логирование | `src/app/core/logger_setup.py` |
 | FastAPI setup | `src/app/core/setup.py` |

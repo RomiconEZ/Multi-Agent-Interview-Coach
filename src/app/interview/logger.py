@@ -1,7 +1,5 @@
 """
 Логгер для сессии интервью.
-
-Сохраняет историю интервью в JSON формате.
 """
 
 from __future__ import annotations
@@ -15,7 +13,7 @@ from typing import Any
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger
 from ..schemas.feedback import InterviewFeedback, InterviewLog
-from ..schemas.interview import CandidateInfo, InterviewState, InterviewTurn
+from ..schemas.interview import InterviewState
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -34,9 +32,9 @@ class InterviewLogger:
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
     def save_session(
-        self,
-        state: InterviewState,
-        feedback: InterviewFeedback | None = None,
+            self,
+            state: InterviewState,
+            feedback: InterviewFeedback | None = None,
     ) -> Path:
         """
         Сохраняет сессию интервью в JSON файл (формат по ТЗ).
@@ -62,9 +60,9 @@ class InterviewLogger:
         return filepath
 
     def save_raw_log(
-        self,
-        state: InterviewState,
-        feedback: InterviewFeedback | None = None,
+            self,
+            state: InterviewState,
+            feedback: InterviewFeedback | None = None,
     ) -> Path:
         """
         Сохраняет детальный лог с внутренними мыслями агентов.

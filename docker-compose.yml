@@ -13,6 +13,9 @@ services:
       - ./.env:/code/.env
       - interview-logs:/code/interview_logs
     restart: on-failure:3
+    depends_on:
+      langfuse:
+        condition: service_started
     networks: [ internal ]
 
   backend:
@@ -26,6 +29,7 @@ services:
       - "${BACKEND_PORT}"
     depends_on:
       - redis_cache
+      - langfuse
     volumes:
       - ./src/app:/code/app
       - ./.env:/code/.env
@@ -52,9 +56,48 @@ services:
     restart: on-failure:3
     networks: [ internal ]
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Langfuse (self-hosted) + PostgreSQL
+  # ─────────────────────────────────────────────────────────────────────────────
+  langfuse-db:
+    image: postgres:15-alpine
+    container_name: "${COMPOSE_PROJECT_NAME}-langfuse-db"
+    environment:
+      POSTGRES_USER: ${LANGFUSE_DB_USER:-langfuse}
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
+      POSTGRES_DB: ${LANGFUSE_DB_NAME:-langfuse}
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LANGFUSE_DB_USER:-langfuse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: on-failure:3
+    networks: [ internal ]
+
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: "${COMPOSE_PROJECT_NAME}-langfuse"
+    ports:
+      - "${LANGFUSE_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: postgresql://${LANGFUSE_DB_USER:-langfuse}:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-db:5432/${LANGFUSE_DB_NAME:-langfuse}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-mysecretkey123456789012345678901234567890}
+      NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT:-3000}
+      SALT: ${LANGFUSE_SALT:-mysalt12345678901234567890123456}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    restart: on-failure:3
+    networks: [ internal ]
+
 volumes:
   redis-cache-data:
   interview-logs:
+  langfuse-db-data:
 
 networks:
   internal:

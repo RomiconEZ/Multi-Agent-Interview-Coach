@@ -1,7 +1,5 @@
 """
 Схемы данных для финального фидбэка интервью.
-
-Содержит модели для вердикта, анализа навыков и рекомендаций.
 """
 
 from __future__ import annotations
@@ -155,31 +153,25 @@ class InterviewFeedback(BaseModel):
     def to_formatted_string(self) -> str:
         """Форматирует фидбэк в читаемую строку."""
         lines: list[str] = []
-
         lines.append("=" * 60)
         lines.append("ФИНАЛЬНЫЙ ФИДБЭК ПО ИНТЕРВЬЮ")
         lines.append("=" * 60)
         lines.append("")
-
         lines.append("📊 ВЕРДИКТ")
         lines.append("-" * 40)
         lines.append(f"Уровень: {self.verdict.grade.value}")
         lines.append(f"Рекомендация: {self.verdict.hiring_recommendation.value}")
         lines.append(f"Уверенность: {self.verdict.confidence_score}%")
         lines.append("")
-
         lines.append("💻 ТЕХНИЧЕСКИЕ НАВЫКИ")
         lines.append("-" * 40)
-
         if self.technical_review.confirmed_skills:
             lines.append("✅ Подтверждённые навыки:")
             for skill in self.technical_review.confirmed_skills:
                 lines.append(f"  • {skill.topic}: {skill.details}")
         else:
             lines.append("✅ Подтверждённые навыки: нет данных")
-
         lines.append("")
-
         if self.technical_review.knowledge_gaps:
             lines.append("❌ Выявленные пробелы:")
             for gap in self.technical_review.knowledge_gaps:
@@ -188,9 +180,7 @@ class InterviewFeedback(BaseModel):
                     lines.append(f"    Правильный ответ: {gap.correct_answer}")
         else:
             lines.append("❌ Выявленные пробелы: не обнаружено")
-
         lines.append("")
-
         lines.append("🤝 СОФТ-СКИЛЛЫ")
         lines.append("-" * 40)
         lines.append(f"Ясность изложения: {self.soft_skills_review.clarity.value}")
@@ -200,12 +190,10 @@ class InterviewFeedback(BaseModel):
         lines.append(f"Вовлечённость: {self.soft_skills_review.engagement}")
         lines.append(f"  {self.soft_skills_review.engagement_details}")
         lines.append("")
-
         lines.append("🗺️ ПЛАН РАЗВИТИЯ")
         lines.append("-" * 40)
         lines.append(self.roadmap.summary)
         lines.append("")
-
         if self.roadmap.items:
             for item in sorted(self.roadmap.items, key=lambda x: x.priority):
                 lines.append(f"[Приоритет {item.priority}] {item.topic}")
@@ -213,13 +201,11 @@ class InterviewFeedback(BaseModel):
                 if item.resources:
                     lines.append(f"  Ресурсы: {', '.join(item.resources)}")
         lines.append("")
-
         lines.append("📝 ОБЩИЕ КОММЕНТАРИИ")
         lines.append("-" * 40)
         lines.append(self.general_comments)
         lines.append("")
         lines.append("=" * 60)
-
         return "\n".join(lines)
 
 

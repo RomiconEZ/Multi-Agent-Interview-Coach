@@ -1,7 +1,5 @@
 """
 Модуль управления интервью.
-
-Содержит сессию интервью и логгер.
 """
 
 from .logger import InterviewLogger, create_interview_logger

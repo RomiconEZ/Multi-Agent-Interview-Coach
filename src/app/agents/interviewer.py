@@ -188,7 +188,10 @@ class InterviewerAgent(BaseAgent):
 
         try:
             response = await self._llm_client.complete(
-                messages, temperature=0.7, max_tokens=300
+                messages,
+                temperature=0.7,
+                max_tokens=300,
+                generation_name="interviewer_greeting",
             )
             return response.strip()
         except Exception as e:
@@ -224,7 +227,10 @@ class InterviewerAgent(BaseAgent):
 
         try:
             response = await self._llm_client.complete(
-                messages, temperature=0.7, max_tokens=800
+                messages,
+                temperature=0.7,
+                max_tokens=800,
+                generation_name="interviewer_response",
             )
             return response.strip(), thoughts
         except Exception as e:

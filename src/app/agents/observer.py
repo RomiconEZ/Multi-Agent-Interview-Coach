@@ -213,7 +213,10 @@ class ObserverAgent(BaseAgent):
 
         try:
             response_text = await self._llm_client.complete(
-                messages, temperature=0.3, max_tokens=1000
+                messages,
+                temperature=0.3,
+                max_tokens=1000,
+                generation_name="observer_analysis",
             )
             response = self._extract_json(response_text)
             return self._parse_analysis(response, user_message)

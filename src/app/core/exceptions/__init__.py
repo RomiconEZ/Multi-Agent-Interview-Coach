@@ -1,3 +1,1 @@
-"""
-Exception classes for the application.
-"""
+"""Exception classes for the application."""

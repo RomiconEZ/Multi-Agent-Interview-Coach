@@ -157,7 +157,10 @@ class EvaluatorAgent(BaseAgent):
 
         try:
             response = await self._llm_client.complete_json(
-                messages, temperature=0.3, max_tokens=3000
+                messages,
+                temperature=0.3,
+                max_tokens=3000,
+                generation_name="evaluator_feedback",
             )
             return self._parse_feedback(response, state)
         except Exception as e:

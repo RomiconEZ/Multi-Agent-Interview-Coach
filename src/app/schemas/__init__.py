@@ -1,7 +1,5 @@
 """
 Модуль схем данных.
-
-Содержит Pydantic модели для интервью и фидбэка.
 """
 
 from .EnvironmentOption import EnvironmentOption

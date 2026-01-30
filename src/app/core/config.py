@@ -191,6 +191,27 @@ class InterviewSettings(_SettingsBase):
         return v
 
 
+class LangfuseSettings(_SettingsBase):
+    """
+    Настройки для Langfuse observability (self-hosted / локальный).
+
+    :ivar LANGFUSE_ENABLED: Включить/выключить Langfuse трекинг.
+    :ivar LANGFUSE_PUBLIC_KEY: Публичный ключ Langfuse.
+    :ivar LANGFUSE_SECRET_KEY: Секретный ключ Langfuse.
+    :ivar LANGFUSE_HOST: URL хоста Langfuse (локальный по умолчанию).
+    """
+
+    LANGFUSE_ENABLED: bool = True
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "http://localhost:3000"
+
+    @field_validator("LANGFUSE_HOST")
+    @classmethod
+    def _host_strip(cls, v: str) -> str:
+        return v.strip().rstrip("/") if v else "http://localhost:3000"
+
+
 class Settings(
     AppSettings,
     EnvironmentSettings,
@@ -199,6 +220,7 @@ class Settings(
     LogSettings,
     LiteLLMSettings,
     InterviewSettings,
+    LangfuseSettings,
 ):
     pass
 

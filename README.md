@@ -4,6 +4,9 @@
 веб-интерфейсом на Gradio. Интеграция с LLM выполняется через LiteLLM proxy (OpenAI-compatible API). Для кэширования
 используется Redis.
 
+Дополнительно в проект включён **локальный Langfuse (self-hosted)** для observability: трекинг вызовов LLM,
+трейсов интервью, метрик токенов и статистики сессии.
+
 ---
 
 ## Скриншот веб-интерфейса
@@ -22,8 +25,13 @@
 - Адаптивная сложность вопросов (BASIC → INTERMEDIATE → ADVANCED → EXPERT).
 - Сохранение логов интервью:
     - основной лог по формату ТЗ,
-    - детальный лог с внутренними мыслями агентов.
-- Запуск через Docker Compose (Gradio + FastAPI backend + Redis + Nginx).
+    - детальный лог с внутренними мыслями агентов,
+    - метрики токенов сессии (в детальном логе и в финальном фидбэке в UI).
+- Observability через **Langfuse (локально)**:
+    - трейсы интервью (greeting / user_message / observer_analysis / interviewer_response / final_feedback),
+    - статистика токенов по сессии и по агентам,
+    - диагностика LLM ошибок (generation end with error).
+- Запуск через Docker Compose (Gradio + FastAPI backend + Redis + Nginx + Langfuse + PostgreSQL).
 - Централизованная конфигурация через `.env` (pydantic-settings).
 - Ротация логов приложения (system.log / personal.log).
 
@@ -35,9 +43,10 @@
 
 - **Gradio UI** (`src/app/ui/gradio_app.py`): веб-интерфейс и управление сессией.
 - **InterviewSession** (`src/app/interview/session.py`): оркестрация агентов, состояние интервью, лимиты ходов,
-  генерация фидбэка.
+  генерация фидбэка, сбор метрик Langfuse.
 - **Агенты** (`src/app/agents/*`): `ObserverAgent`, `InterviewerAgent`, `EvaluatorAgent`.
-- **LLMClient** (`src/app/llm/client.py`): HTTP-клиент к LiteLLM proxy.
+- **LLMClient** (`src/app/llm/client.py`): HTTP-клиент к LiteLLM proxy + трекинг generation в Langfuse.
+- **LangfuseTracker** (`src/app/observability/langfuse_client.py`): трекинг трейсов/генераций и сбор метрик токенов.
 - **FastAPI backend** (`src/app/main.py`, `src/app/core/setup.py`): приложение, middleware, документация.
 - **Redis cache** (`src/app/utils/cache.py`): хранение connection pool и клиента.
 - **Логирование** (`src/app/core/logger_setup.py`): форматтер с TZ, фильтры для system/personal логов, ротация.
@@ -47,6 +56,7 @@
 1. Пользователь отправляет сообщение в Gradio UI.
 2. `InterviewSession.process_message()`:
     - записывает сообщение в последний `InterviewTurn`,
+    - создаёт span `user_message` в Langfuse и увеличивает счётчик ходов,
     - передаёт сообщение в `ObserverAgent.process()` вместе с последним вопросом интервьюера.
 3. `ObserverAgent` возвращает `ObserverAnalysis`:
     - тип ответа (normal / hallucination / off_topic / question / stop_command / introduction / incomplete / excellent),
@@ -57,10 +67,15 @@
 4. `InterviewSession` обновляет состояние:
     - `candidate` (name/grade/tech stack),
     - `covered_topics / confirmed_skills / knowledge_gaps`,
-    - адаптирует `current_difficulty`.
+    - адаптирует `current_difficulty`,
+    - пишет span `observer_analysis` и `difficulty_change` (если был).
 5. `InterviewerAgent.process()` генерирует следующий ответ/вопрос и возвращает также внутренние мысли.
-6. `InterviewSession` создаёт новый `InterviewTurn` с сообщением интервьюера.
-7. По команде остановки или лимиту ходов: `EvaluatorAgent.process()` формирует `InterviewFeedback`, сохраняются логи.
+6. `InterviewSession` создаёт новый `InterviewTurn` с сообщением интервьюера и пишет span `interviewer_response`.
+7. По команде остановки или лимиту ходов:
+    - `EvaluatorAgent.process()` формирует `InterviewFeedback`,
+    - пишется span `final_feedback`,
+    - к трейсу добавляются финальные метрики (token metrics),
+    - сохраняются логи.
 
 ---
 
@@ -157,6 +172,7 @@
 - `src/app/agents/` — агенты (Observer/Interviewer/Evaluator) и общий базовый класс.
 - `src/app/interview/` — сессия и логирование интервью.
 - `src/app/llm/` — LLM клиент для LiteLLM.
+- `src/app/observability/` — Langfuse tracker и метрики токенов сессии.
 - `src/app/core/` — конфигурация, константы, логирование, setup FastAPI.
 - `src/app/ui/` — Gradio интерфейс.
 - `src/app/middleware/` — middleware (например client cache).
@@ -195,6 +211,16 @@
 - `REDIS_CACHE_HOST`
 - `REDIS_CACHE_PORT`
 
+### Langfuse (self-hosted / локально)
+
+- `LANGFUSE_ENABLED` — включить/выключить Langfuse трекинг.
+- `LANGFUSE_HOST` — URL Langfuse для SDK:
+  - в Docker Compose: `http://langfuse:3000`,
+  - при локальном запуске без Compose: обычно `http://localhost:3000`.
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` — ключи Langfuse (создаются в UI: Settings → API Keys).
+- Переменные контейнера Langfuse в `docker-compose.yml`:
+  - `DATABASE_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `SALT`, `TELEMETRY_ENABLED`.
+
 ### Приложение и логирование
 
 - `APP_NAME`, `APP_DESCRIPTION`, `APP_VERSION`, `LICENSE_NAME`, `CONTACT_NAME`, `CONTACT_EMAIL`
@@ -214,6 +240,10 @@
 cp .env.example .env
 ```
 
+Минимально для Langfuse:
+- установите `LANGFUSE_ENABLED=true`,
+- создайте API ключи в Langfuse UI и заполните `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`.
+
 ### 2) Запуск
 
 ```bash
@@ -226,6 +256,37 @@ docker compose up --build
 - **Nginx** (проксирует FastAPI backend): `http://localhost:${NGINX_EXTERNAL_PORT}`
 - **FastAPI backend**: внутри сети compose (контейнер `backend`, порт `${BACKEND_PORT}`).
 - **Redis**: внутри сети compose (контейнер `redis_cache`).
+- **Langfuse UI**: `http://localhost:${LANGFUSE_PORT:-3000}`
+- **Langfuse DB (PostgreSQL)**: внутри сети compose (контейнер `langfuse-db`).
+
+---
+
+## Langfuse (observability)
+
+### Что трекается
+
+В проекте добавлен self-hosted Langfuse для трекинга и метрик:
+
+- trace на каждую сессию интервью (session_id),
+- generation на каждый LLM вызов (observer/interviewer/evaluator),
+- span’ы ключевых этапов:
+  - `greeting`, `user_message`, `observer_analysis`, `interviewer_response`, `final_feedback`,
+  - `difficulty_change` (если менялась сложность),
+  - `session_token_metrics` (финальные метрики).
+- score’ы на трейс:
+  - `total_tokens`, `total_turns`, `llm_calls`, `avg_tokens_per_turn`,
+  - `confidence_score` (вес: confidence_score/100).
+
+### Где в коде
+
+- `src/app/observability/langfuse_client.py` — `LangfuseTracker` + `SessionMetrics`.
+- `src/app/llm/client.py` — создаёт Langfuse generation на каждый вызов LLM.
+- `src/app/interview/session.py` — создаёт trace, добавляет span’ы и сохраняет метрики в лог.
+
+### Как отключить
+
+Установить `LANGFUSE_ENABLED=false`.  
+Также трекинг автоматически отключится, если ключи не заданы (см. логи старта приложения).
 
 ---
 
@@ -253,6 +314,11 @@ export $(cat .env | xargs)
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
+### Запуск Langfuse локально
+
+Если запуск без Docker Compose, Langfuse должен быть доступен по `LANGFUSE_HOST`.
+В Compose это уже настроено (сервис `langfuse` + `langfuse-db`).
+
 ---
 
 ## Использование
@@ -270,6 +336,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 - `interview_log_YYYYMMDD_HHMMSS.json` — основной лог по формату ТЗ.
 - `interview_detailed_YYYYMMDD_HHMMSS.json` — детальный лог с внутренними мыслями.
+  - содержит `token_metrics` (суммарные токены, токены по агентам, средние значения).
+
+В UI в финальный фидбэк дополнительно добавляется блок «📊 МЕТРИКИ СЕССИИ (ТОКЕНЫ)».
 
 ---
 

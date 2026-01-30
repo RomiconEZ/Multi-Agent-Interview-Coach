@@ -13,6 +13,7 @@ from fastapi.openapi.utils import get_openapi
 from .config import Settings
 from .logger_setup import get_system_logger
 from ..middleware.client_cache_middleware import ClientCacheMiddleware
+from ..observability import get_langfuse_tracker
 from ..utils import cache
 
 logger_system = get_system_logger(__name__)
@@ -57,6 +58,16 @@ async def close_redis_cache_pool() -> None:
     logger_system.info("Redis cache pool shut down.")
 
 
+def shutdown_langfuse() -> None:
+    """
+    Корректно завершает работу Langfuse tracker.
+    """
+    logger_system.info("Shutting down Langfuse tracker.")
+    tracker = get_langfuse_tracker()
+    tracker.shutdown()
+    logger_system.info("Langfuse tracker shut down.")
+
+
 def lifespan_factory(
         settings: Settings,
         threadpool_tokens: int,
@@ -91,6 +102,8 @@ def lifespan_factory(
         finally:
             if redis_cache_created:
                 await close_redis_cache_pool()
+
+            shutdown_langfuse()
 
             logger_system.info("Application lifespan finished.")
 

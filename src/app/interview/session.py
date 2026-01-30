@@ -9,12 +9,16 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
+
+from langfuse.client import StatefulTraceClient
 
 from .logger import InterviewLogger, create_interview_logger
 from ..agents import EvaluatorAgent, InterviewerAgent, ObserverAgent
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient, create_llm_client
+from ..observability import SessionMetrics, get_langfuse_tracker
 from ..schemas.feedback import InterviewFeedback
 from ..schemas.interview import (
     AnswerQuality,
@@ -52,6 +56,10 @@ class InterviewSession:
         self._state: InterviewState | None = None
         self._last_agent_message: str = ""
 
+        self._langfuse = get_langfuse_tracker()
+        self._trace: StatefulTraceClient | None = None
+        self._session_id: str = ""
+
     @property
     def is_active(self) -> bool:
         """Проверяет, активна ли сессия."""
@@ -62,6 +70,16 @@ class InterviewSession:
         """Возвращает текущее состояние."""
         return self._state
 
+    def get_session_metrics(self) -> SessionMetrics | None:
+        """
+        Возвращает метрики текущей сессии.
+
+        :return: Метрики или None.
+        """
+        if not self._session_id:
+            return None
+        return self._langfuse.get_session_metrics(self._session_id)
+
     async def start(self) -> str:
         """
         Начинает новую сессию интервью.
@@ -69,8 +87,19 @@ class InterviewSession:
         :return: Приветственное сообщение.
         """
         self._state = InterviewState()
+        self._session_id = str(uuid4())
 
-        logger.info("Starting new interview session")
+        self._trace = self._langfuse.create_trace(
+            name="interview_session",
+            session_id=self._session_id,
+            metadata={
+                "model": self._llm_client.model,
+                "max_turns": self._max_turns,
+            },
+        )
+        self._llm_client.set_trace(self._trace, self._session_id)
+
+        logger.info(f"Starting new interview session, session_id={self._session_id}")
 
         greeting = await self._interviewer.generate_greeting(self._state)
         self._last_agent_message = greeting
@@ -80,6 +109,12 @@ class InterviewSession:
             agent_visible_message=greeting,
         )
         self._state.add_turn(turn)
+
+        self._langfuse.add_span(
+            trace=self._trace,
+            name="greeting",
+            output_data=greeting,
+        )
 
         return greeting
 
@@ -101,6 +136,16 @@ class InterviewSession:
 
         logger.debug(f"Processing user message: {user_message[:50]}...")
 
+        # Увеличиваем счётчик ходов для метрик
+        self._langfuse.increment_turn(self._session_id)
+
+        self._langfuse.add_span(
+            trace=self._trace,
+            name="user_message",
+            input_data=user_message,
+            metadata={"turn": self._state.current_turn},
+        )
+
         analysis = await self._observer.process(
             state=self._state,
             user_message=user_message,
@@ -109,6 +154,17 @@ class InterviewSession:
 
         logger.debug(
             f"Observer analysis: type={analysis.response_type}, quality={analysis.quality}"
+        )
+
+        self._langfuse.add_span(
+            trace=self._trace,
+            name="observer_analysis",
+            output_data={
+                "response_type": analysis.response_type.value,
+                "quality": analysis.quality.value,
+                "is_factually_correct": analysis.is_factually_correct,
+                "recommendation": analysis.recommendation,
+            },
         )
 
         if analysis.extracted_info:
@@ -147,6 +203,13 @@ class InterviewSession:
         )
         self._state.add_turn(turn)
 
+        self._langfuse.add_span(
+            trace=self._trace,
+            name="interviewer_response",
+            output_data=response,
+            metadata={"turn": self._state.current_turn},
+        )
+
         if self._state.current_turn >= self._max_turns:
             self._state.is_active = False
             return response + "\n\n[Достигнут лимит вопросов. Формирую фидбэк...]", True
@@ -175,6 +238,15 @@ class InterviewSession:
                 f"(good_streak: {old_good_streak}->{self._state.consecutive_good_answers}, "
                 f"bad_streak: {old_bad_streak}->{self._state.consecutive_bad_answers})"
             )
+
+            self._langfuse.add_span(
+                trace=self._trace,
+                name="difficulty_change",
+                metadata={
+                    "from": old_difficulty.name,
+                    "to": self._state.current_difficulty.name,
+                },
+            )
         else:
             logger.debug(
                 f"ADAPTIVITY: Difficulty unchanged at {self._state.current_difficulty.name} "
@@ -197,10 +269,63 @@ class InterviewSession:
 
         feedback = await self._evaluator.process(self._state)
 
+        self._langfuse.add_span(
+            trace=self._trace,
+            name="final_feedback",
+            output_data={
+                "grade": feedback.verdict.grade.value,
+                "hiring_recommendation": feedback.verdict.hiring_recommendation.value,
+                "confidence_score": feedback.verdict.confidence_score,
+            },
+        )
+
+        self._langfuse.score_trace(
+            trace=self._trace,
+            name="confidence_score",
+            value=feedback.verdict.confidence_score / 100.0,
+            comment=f"Grade: {feedback.verdict.grade.value}, Recommendation: {feedback.verdict.hiring_recommendation.value}",
+        )
+
+        # Добавляем финальные метрики сессии в Langfuse
+        self._langfuse.add_session_metrics_to_trace(self._trace, self._session_id)
+
+        # Логируем метрики в консоль
+        metrics = self.get_session_metrics()
+        if metrics:
+            logger.info(f"\n{metrics.to_summary_string()}")
+
+        self._langfuse.flush()
+
         summary_path = self._interview_logger.save_session(self._state, feedback)
         detailed_path = self._interview_logger.save_raw_log(self._state, feedback)
 
+        # Сохраняем метрики в детальный лог (добавим отдельно)
+        if metrics:
+            self._save_metrics_to_log(metrics, detailed_path)
+
         return feedback, summary_path, detailed_path
+
+    def _save_metrics_to_log(self, metrics: SessionMetrics, log_path: Path) -> None:
+        """
+        Добавляет метрики токенов в детальный лог.
+
+        :param metrics: Метрики сессии.
+        :param log_path: Путь к файлу лога.
+        """
+        import json
+
+        try:
+            with log_path.open("r", encoding="utf-8") as f:
+                log_data = json.load(f)
+
+            log_data["token_metrics"] = metrics.to_dict()
+
+            with log_path.open("w", encoding="utf-8") as f:
+                json.dump(log_data, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"Token metrics added to log: {log_path}")
+        except Exception as e:
+            logger.error(f"Failed to save metrics to log: {e}")
 
     def _update_candidate_info(self, extracted: Any) -> None:
         """Обновляет информацию о кандидате из extracted_info."""
@@ -211,6 +336,9 @@ class InterviewSession:
             self._state.candidate.name = extracted.name
             self._state.participant_name = extracted.name
             logger.info(f"Extracted candidate name: {extracted.name}")
+
+            if self._trace is not None:
+                self._trace.update(user_id=extracted.name)
 
         if extracted.position and not self._state.candidate.position:
             self._state.candidate.position = extracted.position
@@ -234,6 +362,17 @@ class InterviewSession:
                 if tech and tech not in self._state.candidate.technologies:
                     self._state.candidate.technologies.append(tech)
             logger.info(f"Extracted technologies: {self._state.candidate.technologies}")
+
+        self._langfuse.add_span(
+            trace=self._trace,
+            name="candidate_info_update",
+            output_data={
+                "name": self._state.candidate.name,
+                "position": self._state.candidate.position,
+                "grade": self._state.candidate.target_grade.value if self._state.candidate.target_grade else None,
+                "technologies": self._state.candidate.technologies,
+            },
+        )
 
     def _parse_grade(self, grade_str: str) -> GradeLevel:
         """Парсит строку грейда."""
@@ -290,8 +429,9 @@ class InterviewSession:
 
     async def close(self) -> None:
         """Закрывает сессию и освобождает ресурсы."""
+        self._langfuse.flush()
         await self._llm_client.close()
-        logger.info("Interview session closed")
+        logger.info(f"Interview session closed, session_id={self._session_id}")
 
 
 async def create_interview_session(model: str | None = None) -> InterviewSession:

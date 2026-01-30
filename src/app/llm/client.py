@@ -11,9 +11,11 @@ import logging
 from typing import Any
 
 import httpx
+from langfuse.client import StatefulTraceClient
 
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger
+from ..observability import get_langfuse_tracker
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -48,11 +50,28 @@ class LLMClient:
         self._timeout = timeout
         self._max_retries = max_retries
         self._client: httpx.AsyncClient | None = None
+        self._langfuse = get_langfuse_tracker()
+        self._current_trace: StatefulTraceClient | None = None
+        self._session_id: str | None = None
 
     @property
     def model(self) -> str:
         """Возвращает имя модели."""
         return self._model
+
+    def set_trace(
+        self,
+        trace: StatefulTraceClient | None,
+        session_id: str | None = None,
+    ) -> None:
+        """
+        Устанавливает текущий трейс для LLM вызовов.
+
+        :param trace: Трейс Langfuse.
+        :param session_id: ID сессии для метрик.
+        """
+        self._current_trace = trace
+        self._session_id = session_id
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Возвращает HTTP клиент."""
@@ -84,6 +103,7 @@ class LLMClient:
         messages: list[dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 2000,
+        generation_name: str = "llm_completion",
     ) -> str:
         """
         Выполняет запрос к LLM.
@@ -91,6 +111,7 @@ class LLMClient:
         :param messages: Список сообщений.
         :param temperature: Температура генерации.
         :param max_tokens: Максимальное число токенов.
+        :param generation_name: Имя генерации для Langfuse.
         :return: Ответ модели.
         :raises LLMClientError: При ошибке запроса.
         """
@@ -103,6 +124,17 @@ class LLMClient:
             "max_tokens": max_tokens,
         }
 
+        generation = self._langfuse.create_generation(
+            trace=self._current_trace,
+            name=generation_name,
+            model=self._model,
+            input_messages=messages,
+            metadata={
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            },
+        )
+
         last_error: Exception | None = None
 
         for attempt in range(self._max_retries + 1):
@@ -113,7 +145,25 @@ class LLMClient:
 
                 data = response.json()
                 content: str = data["choices"][0]["message"]["content"]
-                logger.debug(f"LLM response received, length={len(content)}")
+
+                usage = data.get("usage")
+                usage_dict = None
+                if usage:
+                    usage_dict = {
+                        "input": usage.get("prompt_tokens", 0),
+                        "output": usage.get("completion_tokens", 0),
+                        "total": usage.get("total_tokens", 0),
+                    }
+
+                self._langfuse.end_generation(
+                    generation=generation,
+                    output=content,
+                    usage=usage_dict,
+                    session_id=self._session_id,
+                    generation_name=generation_name,
+                )
+
+                logger.debug(f"LLM response received, length={len(content)}, usage={usage_dict}")
                 return content
 
             except httpx.HTTPStatusError as e:
@@ -121,6 +171,11 @@ class LLMClient:
                 logger.warning(f"HTTP error on attempt {attempt + 1}: {e.response.status_code}")
                 if e.response.status_code >= 500:
                     continue
+
+                self._langfuse.end_generation_with_error(
+                    generation=generation,
+                    error=f"HTTP error: {e.response.status_code}",
+                )
                 raise LLMClientError(f"HTTP error: {e.response.status_code}") from e
 
             except httpx.TimeoutException as e:
@@ -134,8 +189,16 @@ class LLMClient:
                 continue
 
             except (KeyError, json.JSONDecodeError) as e:
+                self._langfuse.end_generation_with_error(
+                    generation=generation,
+                    error=f"Invalid response format: {e}",
+                )
                 raise LLMClientError(f"Invalid response format: {e}") from e
 
+        self._langfuse.end_generation_with_error(
+            generation=generation,
+            error=f"Max retries exceeded: {last_error}",
+        )
         raise LLMClientError(f"Max retries exceeded: {last_error}")
 
     async def complete_json(
@@ -143,6 +206,7 @@ class LLMClient:
         messages: list[dict[str, str]],
         temperature: float = 0.3,
         max_tokens: int = 2000,
+        generation_name: str = "llm_json_completion",
     ) -> dict[str, Any]:
         """
         Выполняет запрос к LLM с ожиданием JSON ответа.
@@ -150,10 +214,16 @@ class LLMClient:
         :param messages: Список сообщений.
         :param temperature: Температура генерации.
         :param max_tokens: Максимальное число токенов.
+        :param generation_name: Имя генерации для Langfuse.
         :return: Распарсенный JSON ответ.
         :raises LLMClientError: При ошибке запроса или парсинга.
         """
-        response = await self.complete(messages, temperature, max_tokens)
+        response = await self.complete(
+            messages,
+            temperature,
+            max_tokens,
+            generation_name=generation_name,
+        )
         cleaned = response.strip()
 
         if cleaned.startswith("```json"):

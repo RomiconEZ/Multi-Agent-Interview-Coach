@@ -1,7 +1,5 @@
 """
 Схемы данных для интервью-сессии.
-
-Содержит модели для кандидата, сообщений, мыслей агентов и состояния интервью.
 """
 
 from __future__ import annotations
@@ -64,12 +62,7 @@ class InternalThought(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
     def to_log_dict(self) -> dict[str, str]:
-        """Преобразует в словарь для лога."""
-        return {
-            "from": self.from_agent,
-            "to": self.to_agent,
-            "content": self.content,
-        }
+        return {"from": self.from_agent, "to": self.to_agent, "content": self.content}
 
 
 class ResponseType(str, Enum):
@@ -153,14 +146,8 @@ class InterviewTurn(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
 
     def to_log_dict(self) -> dict[str, object]:
-        """Преобразует в словарь для лога по формату ТЗ."""
-        # Формат: массив объектов с from, to, content
         thoughts_list: list[dict[str, str]] = [
-            {
-                "from": t.from_agent,
-                "to": t.to_agent,
-                "content": t.content,
-            }
+            {"from": t.from_agent, "to": t.to_agent, "content": t.content}
             for t in self.internal_thoughts
         ]
         return {
@@ -210,7 +197,6 @@ class InterviewState(BaseModel):
     consecutive_bad_answers: int = 0
 
     def add_turn(self, turn: InterviewTurn) -> None:
-        """Добавляет ход в историю."""
         self.turns.append(turn)
         self.current_turn += 1
 
@@ -230,18 +216,14 @@ class InterviewState(BaseModel):
             self.consecutive_bad_answers = 0
             if self.consecutive_good_answers >= 2:
                 if self.current_difficulty.value < DifficultyLevel.EXPERT.value:
-                    self.current_difficulty = DifficultyLevel(
-                        self.current_difficulty.value + 1
-                    )
+                    self.current_difficulty = DifficultyLevel(self.current_difficulty.value + 1)
                 self.consecutive_good_answers = 0
         elif analysis.should_simplify:
             self.consecutive_bad_answers += 1
             self.consecutive_good_answers = 0
             if self.consecutive_bad_answers >= 2:
                 if self.current_difficulty.value > DifficultyLevel.BASIC.value:
-                    self.current_difficulty = DifficultyLevel(
-                        self.current_difficulty.value - 1
-                    )
+                    self.current_difficulty = DifficultyLevel(self.current_difficulty.value - 1)
                 self.consecutive_bad_answers = 0
         else:
             self.consecutive_good_answers = 0

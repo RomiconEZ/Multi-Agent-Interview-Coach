@@ -1,14 +1,11 @@
-# --------- requirements ---------
 FROM python:3.11-slim-bookworm as requirements-stage
 
 WORKDIR /tmp
 RUN pip install poetry poetry-plugin-export
 
 COPY ./pyproject.toml ./poetry.lock* /tmp/
-# Группа web ставит gunicorn/uvicorn/httptools; без неё воркеры живут «полегче»
 RUN poetry export -f requirements.txt --output requirements.txt --without-hashes
 
-# --------- final image build ---------
 FROM python:3.11-slim-bookworm
 
 WORKDIR /code
@@ -25,7 +22,6 @@ RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 
 COPY ./src/app /code/app
 
-# N — сколько ядер не трогаем
 ENV RESERVED_CPUS=6
 
 ENTRYPOINT ["sh","-c", "\

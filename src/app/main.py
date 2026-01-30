@@ -1,7 +1,5 @@
 """
 Точка входа FastAPI приложения.
-
-Основной файл для запуска FastAPI backend.
 """
 
 from .api import router
