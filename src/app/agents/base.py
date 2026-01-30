@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from ..llm.client import LLMClient
-from ..schemas.interview import InterviewState, LLMMessage
+from ..schemas.interview import InterviewState
 
 
 class BaseAgent(ABC):
@@ -37,9 +37,9 @@ class BaseAgent(ABC):
         pass
 
     def _build_messages(
-        self,
-        user_content: str,
-        history: list[dict[str, str]] | None = None,
+            self,
+            user_content: str,
+            history: list[dict[str, str]] | None = None,
     ) -> list[dict[str, str]]:
         """
         Строит список сообщений для LLM с правильным чередованием ролей.
@@ -51,25 +51,18 @@ class BaseAgent(ABC):
         messages: list[dict[str, str]] = [
             {"role": "system", "content": self.system_prompt}
         ]
-        
+
         if history:
-            # Убираем последний user message из истории, т.к. мы добавим свой user_content
-            filtered_history: list[dict[str, str]] = []
-            for msg in history:
-                filtered_history.append(msg)
-            
-            # Если история заканчивается на user - убираем его
+            filtered_history = list(history)
+
             if filtered_history and filtered_history[-1]["role"] == "user":
                 filtered_history = filtered_history[:-1]
-            
-            # Убеждаемся что после system идёт user (а не assistant)
-            # Некоторые LLM требуют: system -> user -> assistant -> user -> ...
+
             if filtered_history and filtered_history[0]["role"] == "assistant":
-                # Добавляем фиктивный user перед первым assistant
                 messages.append({"role": "user", "content": "Начнём интервью."})
-            
+
             messages.extend(filtered_history)
-        
+
         messages.append({"role": "user", "content": user_content})
         return messages
 

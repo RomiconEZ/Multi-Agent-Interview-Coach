@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from .logger import InterviewLogger, create_interview_logger
 from ..agents import EvaluatorAgent, InterviewerAgent, ObserverAgent
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger
@@ -17,14 +18,12 @@ from ..llm.client import LLMClient, create_llm_client
 from ..schemas.feedback import InterviewFeedback
 from ..schemas.interview import (
     AnswerQuality,
-    CandidateInfo,
     DifficultyLevel,
     GradeLevel,
     InterviewState,
     InterviewTurn,
     ResponseType,
 )
-from .logger import InterviewLogger, create_interview_logger
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -37,10 +36,10 @@ class InterviewSession:
     """
 
     def __init__(
-        self,
-        llm_client: LLMClient,
-        interview_logger: InterviewLogger,
-        max_turns: int,
+            self,
+            llm_client: LLMClient,
+            interview_logger: InterviewLogger,
+            max_turns: int,
     ) -> None:
         self._llm_client = llm_client
         self._interview_logger = interview_logger
@@ -97,55 +96,40 @@ class InterviewSession:
         if not self._state.is_active:
             return "Интервью завершено.", True
 
-        # Записываем ответ пользователя в предыдущий ход
         if self._state.turns:
             self._state.turns[-1].user_message = user_message
 
         logger.debug(f"Processing user message: {user_message[:50]}...")
 
-        # Анализ ответа Observer'ом
         analysis = await self._observer.process(
             state=self._state,
             user_message=user_message,
             last_question=self._last_agent_message,
         )
 
-        logger.debug(f"Observer analysis: type={analysis.response_type}, quality={analysis.quality}")
+        logger.debug(
+            f"Observer analysis: type={analysis.response_type}, quality={analysis.quality}"
+        )
 
-        # Извлечение информации о кандидате
         if analysis.extracted_info:
             self._update_candidate_info(analysis.extracted_info)
 
-        # Проверка на команду остановки
         if analysis.response_type == ResponseType.STOP_COMMAND:
-            # Записываем thoughts даже при остановке
             if self._state.turns:
                 self._state.turns[-1].internal_thoughts = list(analysis.thoughts)
             self._state.is_active = False
             return "Завершаю интервью и формирую фидбэк...", True
 
-        # Обновление состояния
         self._update_state_from_analysis(analysis, user_message)
-        
-        # Адаптивность: корректировка сложности с логированием
-        old_difficulty = self._state.current_difficulty
-        self._state.adjust_difficulty(analysis)
-        if old_difficulty != self._state.current_difficulty:
-            logger.info(
-                f"ADAPTIVITY: Difficulty changed from {old_difficulty.name} to "
-                f"{self._state.current_difficulty.name} "
-                f"(good_streak={self._state.consecutive_good_answers}, "
-                f"bad_streak={self._state.consecutive_bad_answers})"
-            )
-        
-        # Если Observer определил demonstrated_level выше/ниже заявленного
+
+        self._apply_difficulty_adjustment(analysis)
+
         if analysis.demonstrated_level and self._state.candidate.target_grade:
             logger.info(
                 f"ADAPTIVITY: Candidate claimed {self._state.candidate.target_grade.value}, "
                 f"demonstrated {analysis.demonstrated_level}"
             )
 
-        # Генерация ответа Interviewer'ом
         response, thoughts = await self._interviewer.process(
             state=self._state,
             analysis=analysis,
@@ -154,7 +138,6 @@ class InterviewSession:
 
         self._last_agent_message = response
 
-        # Записываем thoughts в предыдущий turn и создаём новый
         if self._state.turns:
             self._state.turns[-1].internal_thoughts = thoughts
 
@@ -164,12 +147,42 @@ class InterviewSession:
         )
         self._state.add_turn(turn)
 
-        # Проверка лимита ходов
         if self._state.current_turn >= self._max_turns:
             self._state.is_active = False
             return response + "\n\n[Достигнут лимит вопросов. Формирую фидбэк...]", True
 
         return response, False
+
+    def _apply_difficulty_adjustment(self, analysis: Any) -> None:
+        """
+        Применяет корректировку сложности с детальным логированием.
+
+        :param analysis: Анализ от Observer.
+        """
+        if self._state is None:
+            return
+
+        old_difficulty = self._state.current_difficulty
+        old_good_streak = self._state.consecutive_good_answers
+        old_bad_streak = self._state.consecutive_bad_answers
+
+        self._state.adjust_difficulty(analysis)
+
+        if old_difficulty != self._state.current_difficulty:
+            logger.info(
+                f"ADAPTIVITY: Difficulty changed from {old_difficulty.name} to "
+                f"{self._state.current_difficulty.name} "
+                f"(good_streak: {old_good_streak}->{self._state.consecutive_good_answers}, "
+                f"bad_streak: {old_bad_streak}->{self._state.consecutive_bad_answers})"
+            )
+        else:
+            logger.debug(
+                f"ADAPTIVITY: Difficulty unchanged at {self._state.current_difficulty.name} "
+                f"(should_increase={analysis.should_increase_difficulty}, "
+                f"should_simplify={analysis.should_simplify}, "
+                f"good_streak: {old_good_streak}->{self._state.consecutive_good_answers}, "
+                f"bad_streak: {old_bad_streak}->{self._state.consecutive_bad_answers})"
+            )
 
     async def generate_feedback(self) -> tuple[InterviewFeedback, Path, Path]:
         """
@@ -207,13 +220,15 @@ class InterviewSession:
             grade = self._parse_grade(extracted.grade)
             self._state.candidate.target_grade = grade
             self._state.current_difficulty = self._get_initial_difficulty(grade)
-            logger.info(f"Extracted grade: {grade.value}, setting difficulty to {self._state.current_difficulty.name}")
+            logger.info(
+                f"Extracted grade: {grade.value}, "
+                f"setting difficulty to {self._state.current_difficulty.name}"
+            )
 
         if extracted.experience and not self._state.candidate.experience:
             self._state.candidate.experience = extracted.experience
             logger.info(f"Extracted experience: {extracted.experience[:50]}...")
 
-        # Обновление технологий (добавляем к существующим)
         if extracted.technologies:
             for tech in extracted.technologies:
                 if tech and tech not in self._state.candidate.technologies:
@@ -243,9 +258,9 @@ class InterviewSession:
         return mapping.get(grade, DifficultyLevel.BASIC)
 
     def _update_state_from_analysis(
-        self,
-        analysis: Any,
-        user_message: str,
+            self,
+            analysis: Any,
+            user_message: str,
     ) -> None:
         """Обновляет состояние на основе анализа."""
         if self._state is None:
@@ -263,7 +278,11 @@ class InterviewSession:
 
         if not analysis.is_factually_correct or analysis.quality == AnswerQuality.WRONG:
             gap = {
-                "topic": ", ".join(analysis.detected_topics) if analysis.detected_topics else "Общие знания",
+                "topic": (
+                    ", ".join(analysis.detected_topics)
+                    if analysis.detected_topics
+                    else "Общие знания"
+                ),
                 "user_answer": user_message[:200],
                 "correct_answer": analysis.correct_answer,
             }
