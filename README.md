@@ -243,11 +243,11 @@
 
 Файл `.env.example` содержит полный перечень переменных окружения. Основные:
 
-### LiteLLM
+### LiteLLM (подключение приложения к прокси)
 
 - `LITELLM_BASE_URL` — базовый URL LiteLLM proxy.
-- `LITELLM_API_KEY` — ключ доступа (обязателен, если включена авторизация).
-- `LITELLM_MODEL` — модель по умолчанию.
+- `LITELLM_API_KEY` — ключ доступа к LiteLLM.
+- `LITELLM_MODEL` — модель по умолчанию (значение `model_name` из конфигурации LiteLLM).
 - `LITELLM_TIMEOUT` — таймаут запросов.
 - `LITELLM_MAX_RETRIES` — количество повторных попыток.
 
@@ -278,6 +278,56 @@
 - `CLIENT_CACHE_MAX_AGE` — max-age для `Cache-Control`.
 - `APP_TZ_OFFSET` — смещение TZ для логов.
 - `APP_LOG_DIR` — директория логов приложения.
+
+---
+
+## LiteLLM шлюз (llm-gateway-litellm)
+
+В репозитории есть отдельный шлюз **LiteLLM** для OpenAI-compatible API маршрутизации к нескольким бэкендам (локальным
+и облачным), с хранением конфигурации моделей и логов в PostgreSQL.
+
+Директория: `llm-gateway-litellm/`
+
+### Что поднимается
+
+- **LiteLLM** (контейнер `litellm`) — OpenAI-compatible API + маршрутизация запросов + healthchecks.
+- **PostgreSQL** (контейнер `litellm_db`) — хранение моделей/настроек/логов при включённом `STORE_MODEL_IN_DB`.
+
+### Быстрый старт LiteLLM
+
+```bash
+cd llm-gateway-litellm
+cp .env.example .env
+docker compose up -d
+curl -sS "http://localhost:${LITELLM_PORT_EXTERNAL}/health/liveliness"
+```
+
+Остановка:
+
+```bash
+docker compose down
+```
+
+### Основные переменные окружения LiteLLM
+
+Файл `llm-gateway-litellm/.env.example` содержит полный набор параметров.
+
+### Конфигурация моделей LiteLLM
+
+Файл `llm-gateway-litellm/config.yaml` задаёт:
+
+- `model_list` — список моделей (значения используются в поле `model` запросов).
+- `general_settings.store_model_in_db: true` — хранить модели в БД.
+- `litellm_settings` — таймауты и формат логов.
+
+### Как подключить Interview Coach к LiteLLM шлюзу
+
+1. Поднимите LiteLLM шлюз (см. шаги выше).
+2. В корневом `.env` проекта укажите параметры подключения:
+
+- `LITELLM_BASE_URL=http://localhost:4000` (или ваш `${LITELLM_PORT_EXTERNAL}`)
+- `LITELLM_API_KEY=<LITELLM_MASTER_KEY>`
+- `LITELLM_MODEL=local_llm` (или `cloud/deepseek-chat`, `cloud/deepseek-coder`, `cloud/deepseek-reasoner`)
 
 ---
 
