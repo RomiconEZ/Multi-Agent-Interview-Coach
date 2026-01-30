@@ -233,14 +233,18 @@ class InterviewState(BaseModel):
             self.consecutive_bad_answers = 0
             if self.consecutive_good_answers >= 2:
                 if self.current_difficulty.value < DifficultyLevel.EXPERT.value:
-                    self.current_difficulty = DifficultyLevel(self.current_difficulty.value + 1)
+                    self.current_difficulty = DifficultyLevel(
+                        self.current_difficulty.value + 1
+                    )
                 self.consecutive_good_answers = 0
         elif analysis.should_simplify:
             self.consecutive_bad_answers += 1
             self.consecutive_good_answers = 0
             if self.consecutive_bad_answers >= 2:
                 if self.current_difficulty.value > DifficultyLevel.BASIC.value:
-                    self.current_difficulty = DifficultyLevel(self.current_difficulty.value - 1)
+                    self.current_difficulty = DifficultyLevel(
+                        self.current_difficulty.value - 1
+                    )
                 self.consecutive_bad_answers = 0
         else:
             self.consecutive_good_answers = 0

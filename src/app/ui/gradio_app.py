@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
 from pathlib import Path
 from typing import Any
 
@@ -31,12 +32,15 @@ def _run_async(coro: Any) -> Any:
 
     if loop.is_running():
         import nest_asyncio
+
         nest_asyncio.apply()
 
     return loop.run_until_complete(coro)
 
 
-async def _start_interview_async(model: str) -> tuple[str, str, list[tuple[str | None, str | None]]]:
+async def _start_interview_async(
+    model: str,
+) -> tuple[str, str, list[tuple[str | None, str | None]]]:
     """
     Асинхронно начинает интервью.
 
@@ -67,8 +71,8 @@ def start_interview(model: str) -> tuple[str, str, list[tuple[str | None, str | 
 
 
 async def _send_message_async(
-        message: str,
-        history: list[tuple[str | None, str | None]],
+    message: str,
+    history: list[tuple[str | None, str | None]],
 ) -> tuple[str, str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     """
     Асинхронно обрабатывает сообщение.
@@ -104,20 +108,22 @@ async def _send_message_async(
         status = "✅ Интервью завершено. Фидбэк сгенерирован."
         return status, "", history, feedback_text, str(summary_path), str(detailed_path)
 
-    status = f"✅ Ход {_current_session.state.current_turn if _current_session.state else '?'}"
+    status = (
+        f"✅ Ход {_current_session.state.current_turn if _current_session.state else '?'}"
+    )
     return status, "", history, "", None, None
 
 
 def send_message(
-        message: str,
-        history: list[tuple[str | None, str | None]],
+    message: str,
+    history: list[tuple[str | None, str | None]],
 ) -> tuple[str, str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     """Синхронная обёртка для отправки сообщения."""
     return _run_async(_send_message_async(message, history))
 
 
 async def _stop_interview_async(
-        history: list[tuple[str | None, str | None]],
+    history: list[tuple[str | None, str | None]],
 ) -> tuple[str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     """Асинхронно завершает интервью."""
     global _current_session, _last_log_path, _last_detailed_log_path
@@ -141,11 +147,17 @@ async def _stop_interview_async(
 
     history.append(("Стоп интервью", "Интервью завершено. Формирую фидбэк..."))
 
-    return "✅ Интервью завершено", history, feedback_text, str(summary_path), str(detailed_path)
+    return (
+        "✅ Интервью завершено",
+        history,
+        feedback_text,
+        str(summary_path),
+        str(detailed_path),
+    )
 
 
 def stop_interview(
-        history: list[tuple[str | None, str | None]],
+    history: list[tuple[str | None, str | None]],
 ) -> tuple[str, list[tuple[str | None, str | None]], str, str | None, str | None]:
     return _run_async(_stop_interview_async(history))
 
@@ -218,28 +230,48 @@ def create_gradio_interface() -> gr.Blocks:
         send_btn.click(
             fn=send_message,
             inputs=[msg_input, chatbot],
-            outputs=[status_output, msg_input, chatbot, feedback_output, main_log_file, detailed_log_file],
+            outputs=[
+                status_output,
+                msg_input,
+                chatbot,
+                feedback_output,
+                main_log_file,
+                detailed_log_file,
+            ],
         )
 
         msg_input.submit(
             fn=send_message,
             inputs=[msg_input, chatbot],
-            outputs=[status_output, msg_input, chatbot, feedback_output, main_log_file, detailed_log_file],
+            outputs=[
+                status_output,
+                msg_input,
+                chatbot,
+                feedback_output,
+                main_log_file,
+                detailed_log_file,
+            ],
         )
 
         stop_btn.click(
             fn=stop_interview,
             inputs=[chatbot],
-            outputs=[status_output, chatbot, feedback_output, main_log_file, detailed_log_file],
+            outputs=[
+                status_output,
+                chatbot,
+                feedback_output,
+                main_log_file,
+                detailed_log_file,
+            ],
         )
 
     return app
 
 
 def launch_app(
-        server_name: str = "0.0.0.0",
-        server_port: int = 7860,
-        share: bool = False,
+    server_name: str = "0.0.0.0",
+    server_port: int = 7860,
+    share: bool = False,
 ) -> None:
     """
     Запускает Gradio приложение.

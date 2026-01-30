@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+
 from typing import Final, FrozenSet, Pattern
 
 REQUEST_ID_PATTERN: Final[Pattern[str]] = re.compile(

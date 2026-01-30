@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -114,7 +115,9 @@ class SessionMetrics:
             "generation_count": self.generation_count,
             "turn_count": self.turn_count,
             "avg_tokens_per_turn": round(self.get_average_tokens_per_turn(), 2),
-            "avg_tokens_per_generation": round(self.get_average_tokens_per_generation(), 2),
+            "avg_tokens_per_generation": round(
+                self.get_average_tokens_per_generation(), 2
+            ),
             "by_agent": {
                 "observer": {
                     **self.observer_usage.to_dict(),
@@ -329,7 +332,9 @@ class LangfuseTracker:
                     output_tokens=usage.get("output", 0),
                 )
 
-        logger.debug(f"Langfuse generation ended: output_len={len(output)}, usage={usage}")
+        logger.debug(
+            f"Langfuse generation ended: output_len={len(output)}, usage={usage}"
+        )
 
     def end_generation_with_error(
         self,

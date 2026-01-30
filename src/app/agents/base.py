@@ -37,9 +37,9 @@ class BaseAgent(ABC):
         pass
 
     def _build_messages(
-            self,
-            user_content: str,
-            history: list[dict[str, str]] | None = None,
+        self,
+        user_content: str,
+        history: list[dict[str, str]] | None = None,
     ) -> list[dict[str, str]]:
         """
         Строит список сообщений для LLM с правильным чередованием ролей.

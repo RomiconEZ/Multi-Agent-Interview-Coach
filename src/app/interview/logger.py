@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -32,9 +33,9 @@ class InterviewLogger:
         self._log_dir.mkdir(parents=True, exist_ok=True)
 
     def save_session(
-            self,
-            state: InterviewState,
-            feedback: InterviewFeedback | None = None,
+        self,
+        state: InterviewState,
+        feedback: InterviewFeedback | None = None,
     ) -> Path:
         """
         Сохраняет сессию интервью в JSON файл (формат по ТЗ).
@@ -60,9 +61,9 @@ class InterviewLogger:
         return filepath
 
     def save_raw_log(
-            self,
-            state: InterviewState,
-            feedback: InterviewFeedback | None = None,
+        self,
+        state: InterviewState,
+        feedback: InterviewFeedback | None = None,
     ) -> Path:
         """
         Сохраняет детальный лог с внутренними мыслями агентов.
@@ -80,7 +81,9 @@ class InterviewLogger:
             "candidate_info": {
                 "name": state.candidate.name,
                 "position": state.candidate.position,
-                "target_grade": state.candidate.target_grade.value if state.candidate.target_grade else None,
+                "target_grade": state.candidate.target_grade.value
+                if state.candidate.target_grade
+                else None,
                 "experience": state.candidate.experience,
                 "technologies": state.candidate.technologies,
             },

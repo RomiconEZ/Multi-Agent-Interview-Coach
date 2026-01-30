@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
+
 from typing import Any
 
 import httpx
+
 from langfuse.client import StatefulTraceClient
 
 from ..core.config import settings
@@ -84,7 +86,9 @@ class LLMClient:
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self._api_key}",
             }
-            logger.debug(f"Creating LLM client for {self._base_url}, key=***{self._api_key[-4:] if len(self._api_key) > 4 else '****'}")
+            logger.debug(
+                f"Creating LLM client for {self._base_url}, key=***{self._api_key[-4:] if len(self._api_key) > 4 else '****'}"
+            )
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 headers=headers,
@@ -163,12 +167,16 @@ class LLMClient:
                     generation_name=generation_name,
                 )
 
-                logger.debug(f"LLM response received, length={len(content)}, usage={usage_dict}")
+                logger.debug(
+                    f"LLM response received, length={len(content)}, usage={usage_dict}"
+                )
                 return content
 
             except httpx.HTTPStatusError as e:
                 last_error = e
-                logger.warning(f"HTTP error on attempt {attempt + 1}: {e.response.status_code}")
+                logger.warning(
+                    f"HTTP error on attempt {attempt + 1}: {e.response.status_code}"
+                )
                 if e.response.status_code >= 500:
                     continue
 

@@ -6,15 +6,16 @@ from typing import Any
 import anyio
 import fastapi
 import redis.asyncio as redis
+
 from fastapi import APIRouter, FastAPI
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
-from .config import Settings
-from .logger_setup import get_system_logger
 from ..middleware.client_cache_middleware import ClientCacheMiddleware
 from ..observability import get_langfuse_tracker
 from ..utils import cache
+from .config import Settings
+from .logger_setup import get_system_logger
 
 logger_system = get_system_logger(__name__)
 
@@ -69,8 +70,8 @@ def shutdown_langfuse() -> None:
 
 
 def lifespan_factory(
-        settings: Settings,
-        threadpool_tokens: int,
+    settings: Settings,
+    threadpool_tokens: int,
 ) -> Callable[[FastAPI], _AsyncGeneratorContextManager[Any]]:
     """
     Фабрика, возвращающая функцию lifespan (контекст запуска и остановки приложения).
@@ -111,10 +112,10 @@ def lifespan_factory(
 
 
 def create_application(
-        router: APIRouter,
-        settings: Settings,
-        threadpool_tokens: int = 100,
-        **kwargs: Any,
+    router: APIRouter,
+    settings: Settings,
+    threadpool_tokens: int = 100,
+    **kwargs: Any,
 ) -> FastAPI:
     """
     Создаёт FastAPI-приложение с нужными роутерами, middleware и lifecycle-логикой.

@@ -7,13 +7,13 @@
 from __future__ import annotations
 
 import logging
+
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from langfuse.client import StatefulTraceClient
 
-from .logger import InterviewLogger, create_interview_logger
 from ..agents import EvaluatorAgent, InterviewerAgent, ObserverAgent
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger
@@ -28,6 +28,7 @@ from ..schemas.interview import (
     InterviewTurn,
     ResponseType,
 )
+from .logger import InterviewLogger, create_interview_logger
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -40,10 +41,10 @@ class InterviewSession:
     """
 
     def __init__(
-            self,
-            llm_client: LLMClient,
-            interview_logger: InterviewLogger,
-            max_turns: int,
+        self,
+        llm_client: LLMClient,
+        interview_logger: InterviewLogger,
+        max_turns: int,
     ) -> None:
         self._llm_client = llm_client
         self._interview_logger = interview_logger
@@ -369,7 +370,9 @@ class InterviewSession:
             output_data={
                 "name": self._state.candidate.name,
                 "position": self._state.candidate.position,
-                "grade": self._state.candidate.target_grade.value if self._state.candidate.target_grade else None,
+                "grade": self._state.candidate.target_grade.value
+                if self._state.candidate.target_grade
+                else None,
                 "technologies": self._state.candidate.technologies,
             },
         )
@@ -397,9 +400,9 @@ class InterviewSession:
         return mapping.get(grade, DifficultyLevel.BASIC)
 
     def _update_state_from_analysis(
-            self,
-            analysis: Any,
-            user_message: str,
+        self,
+        analysis: Any,
+        user_message: str,
     ) -> None:
         """Обновляет состояние на основе анализа."""
         if self._state is None:

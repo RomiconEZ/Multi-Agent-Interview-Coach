@@ -13,10 +13,16 @@ from .ui import launch_app
 
 def parse_args() -> argparse.Namespace:
     """Парсит аргументы командной строки."""
-    parser = argparse.ArgumentParser(description="Multi-Agent Interview Coach - Gradio Interface")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind the server")
+    parser = argparse.ArgumentParser(
+        description="Multi-Agent Interview Coach - Gradio Interface"
+    )
+    parser.add_argument(
+        "--host", type=str, default="0.0.0.0", help="Host to bind the server"
+    )
     parser.add_argument("--port", type=int, default=7860, help="Port to run the server")
-    parser.add_argument("--share", action="store_true", help="Create a public shareable link")
+    parser.add_argument(
+        "--share", action="store_true", help="Create a public shareable link"
+    )
     return parser.parse_args()
 
 

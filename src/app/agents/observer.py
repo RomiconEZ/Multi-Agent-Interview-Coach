@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+
 from typing import Any
 
 from ..core.logger_setup import get_system_logger
@@ -235,9 +236,17 @@ class ObserverAgent(BaseAgent):
 
         candidate_name = state.candidate.name or "Неизвестно"
         candidate_position = state.candidate.position or "Не указана"
-        candidate_grade = state.candidate.target_grade.value if state.candidate.target_grade else "Не указан"
+        candidate_grade = (
+            state.candidate.target_grade.value
+            if state.candidate.target_grade
+            else "Не указан"
+        )
         candidate_experience = state.candidate.experience or "Не указан"
-        candidate_technologies = ", ".join(state.candidate.technologies) if state.candidate.technologies else "Не указаны"
+        candidate_technologies = (
+            ", ".join(state.candidate.technologies)
+            if state.candidate.technologies
+            else "Не указаны"
+        )
 
         return f"""## КОНТЕКСТ ИНТЕРВЬЮ
 
@@ -334,7 +343,9 @@ ANSWERED_LAST_QUESTION=YES|NO; NEXT_STEP=..."""
 
         extracted_data = response.get("extracted_info", {})
         extracted_info = None
-        if extracted_data and any(v for k, v in extracted_data.items() if k != "technologies" and v):
+        if extracted_data and any(
+            v for k, v in extracted_data.items() if k != "technologies" and v
+        ):
             extracted_info = ExtractedCandidateInfo(
                 name=extracted_data.get("name"),
                 position=extracted_data.get("position"),
@@ -365,7 +376,10 @@ ANSWERED_LAST_QUESTION=YES|NO; NEXT_STEP=..."""
         """Создаёт резервный анализ при ошибке."""
         lower_msg = user_message.lower()
 
-        if any(cmd in lower_msg for cmd in ["стоп", "stop", "хватит", "фидбэк", "завершить", "стоп игра"]):
+        if any(
+            cmd in lower_msg
+            for cmd in ["стоп", "stop", "хватит", "фидбэк", "завершить", "стоп игра"]
+        ):
             response_type = ResponseType.STOP_COMMAND
         elif "?" in user_message:
             response_type = ResponseType.QUESTION

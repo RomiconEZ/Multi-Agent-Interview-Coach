@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+
 from typing import Any
 
 from ..core.logger_setup import get_system_logger
@@ -178,7 +179,9 @@ class EvaluatorAgent(BaseAgent):
         if state.candidate.position:
             candidate_info_parts.append(f"Позиция: {state.candidate.position}")
         if state.candidate.target_grade:
-            candidate_info_parts.append(f"Целевой грейд: {state.candidate.target_grade.value}")
+            candidate_info_parts.append(
+                f"Целевой грейд: {state.candidate.target_grade.value}"
+            )
         if state.candidate.experience:
             candidate_info_parts.append(f"Заявленный опыт: {state.candidate.experience}")
 
@@ -256,8 +259,7 @@ class EvaluatorAgent(BaseAgent):
         tech_data = response.get("technical_review", {})
         technical_review = TechnicalReview(
             confirmed_skills=[
-                SkillAssessment(**s)
-                for s in tech_data.get("confirmed_skills", [])
+                SkillAssessment(**s) for s in tech_data.get("confirmed_skills", [])
             ],
             knowledge_gaps=[
                 SkillAssessment(**s) for s in tech_data.get("knowledge_gaps", [])
@@ -276,10 +278,7 @@ class EvaluatorAgent(BaseAgent):
 
         roadmap_data = response.get("roadmap", {})
         roadmap = PersonalRoadmap(
-            items=[
-                RoadmapItem(**item)
-                for item in roadmap_data.get("items", [])
-            ],
+            items=[RoadmapItem(**item) for item in roadmap_data.get("items", [])],
             summary=roadmap_data.get("summary", "План развития не сформирован"),
         )
 

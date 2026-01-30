@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
@@ -60,17 +61,19 @@ class PersonalLogFilter(logging.Filter):
 
 
 SYSTEM_LOG_FORMAT: Final[str] = "%(asctime)s - %(levelname)s - %(log_type)s - %(message)s"
-PERSONAL_LOG_FORMAT: Final[str] = "%(asctime)s - %(levelname)s - %(log_type)s ID:%(id)s - %(message)s"
+PERSONAL_LOG_FORMAT: Final[
+    str
+] = "%(asctime)s - %(levelname)s - %(log_type)s ID:%(id)s - %(message)s"
 CONSOLE_FORMAT: Final[str] = "%(asctime)s - %(levelname)s - %(log_type)s - %(message)s"
 
 
 def _create_file_handler(
-        path: Path,
-        level: int,
-        log_format: str,
-        log_filter: logging.Filter,
-        max_bytes: int,
-        backup_count: int,
+    path: Path,
+    level: int,
+    log_format: str,
+    log_filter: logging.Filter,
+    max_bytes: int,
+    backup_count: int,
 ) -> RotatingFileHandler:
     """
     Создаёт RotatingFileHandler с заданными параметрами.
@@ -118,13 +121,13 @@ def set_external_loggers_levels() -> None:
     Также отключает propagate, чтобы сообщения не всплывали в root при DEBUG.
     """
     for name in (
-            "multipart.multipart",
-            "python_multipart.multipart",
-            "urllib3",
-            "urllib3.connectionpool",
-            "httpx",
-            "httpcore",
-            "anyio",
+        "multipart.multipart",
+        "python_multipart.multipart",
+        "urllib3",
+        "urllib3.connectionpool",
+        "httpx",
+        "httpcore",
+        "anyio",
     ):
         lg = logging.getLogger(name)
         lg.setLevel(logging.WARNING)
@@ -190,7 +193,9 @@ def get_system_logger(name: str) -> logging.LoggerAdapter[logging.Logger]:
     return logging.LoggerAdapter(base_logger, {"log_type": "SYSTEM"})
 
 
-def get_personal_logger(request_id: str | None, name: str) -> logging.LoggerAdapter[logging.Logger]:
+def get_personal_logger(
+    request_id: str | None, name: str
+) -> logging.LoggerAdapter[logging.Logger]:
     """
     Возвращает адаптер для персональных логов.
 
