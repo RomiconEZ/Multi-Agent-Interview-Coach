@@ -1,0 +1,46 @@
+services:
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:${LITELLM_IMAGE_TAG}
+    container_name: litellm
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    command:
+      - "--config=/app/config.yaml"
+    ports:
+      - "${LITELLM_PORT_EXTERNAL}:4000"
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      STORE_MODEL_IN_DB: "${STORE_MODEL_IN_DB}"
+    env_file:
+      - .env
+    depends_on:
+      - db  # Indicates that this service depends on the 'db' service, ensuring 'db' starts first
+    healthcheck:
+      test: [ "CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness', timeout=5).read()\"" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  db:
+    image: postgres:${POSTGRES_IMAGE_TAG}
+    container_name: litellm_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT_EXTERNAL}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -d litellm -U llmproxy" ]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+    name: litellm_postgres_data

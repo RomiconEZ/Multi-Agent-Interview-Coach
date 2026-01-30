@@ -1,0 +1,50 @@
+model_list:
+  - model_name: local_llm
+    litellm_params:
+      model: "lm_studio/local_llm"
+      api_base: "os.environ/LOCAL_LLM_BASE_URL"
+      api_key: "os.environ/LOCAL_LLM_API_KEY"
+
+  - model_name: cloud/deepseek-chat
+    litellm_params:
+      model: "deepseek/deepseek-chat"
+      api_base: "os.environ/DEEPSEEK_BASE_URL"
+      api_key: "os.environ/DEEPSEEK_API_KEY"
+    model_info:
+      custom_tokenizer:
+        identifier: deepseek-ai/DeepSeek-V3.2
+        revision: main
+        auth_token: "123"
+
+  - model_name: cloud/deepseek-coder
+    litellm_params:
+      model: "deepseek/deepseek-coder"
+      api_base: "os.environ/DEEPSEEK_BASE_URL"
+      api_key: "os.environ/DEEPSEEK_API_KEY"
+    model_info:
+      custom_tokenizer:
+        identifier: deepseek-ai/DeepSeek-V3.2
+        revision: main
+        auth_token: "123"
+
+  - model_name: cloud/deepseek-reasoner
+    litellm_params:
+      model: "deepseek/deepseek-reasoner"
+      api_base: "os.environ/DEEPSEEK_BASE_URL"
+      api_key: "os.environ/DEEPSEEK_API_KEY"
+    model_info:
+      custom_tokenizer:
+        identifier: deepseek-ai/DeepSeek-V3.2
+        revision: main
+        auth_token: "123"
+
+
+general_settings:
+  store_model_in_db: true
+  store_prompts_in_spend_logs: true
+
+
+litellm_settings:
+  request_timeout: 1800    # raise Timeout error if call takes longer than 1800 seconds. Default value is 6000seconds if not set
+  set_verbose: False      # Switch off Debug Logging, ensure your logs do not have any debugging on
+  json_logs: true         # Get debug logs in json format
