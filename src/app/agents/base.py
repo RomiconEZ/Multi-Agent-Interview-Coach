@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from ..llm.client import LLMClient
+from ..schemas.agent_settings import SingleAgentConfig
 from ..schemas.interview import InterviewState
 
 
@@ -19,16 +20,28 @@ class BaseAgent(ABC):
 
     :ivar name: Имя агента.
     :ivar llm_client: Клиент LLM.
+    :ivar config: Конфигурация агента (температура, макс. токенов).
     """
 
-    def __init__(self, name: str, llm_client: LLMClient) -> None:
+    def __init__(
+        self,
+        name: str,
+        llm_client: LLMClient,
+        config: SingleAgentConfig,
+    ) -> None:
         self._name = name
         self._llm_client = llm_client
+        self._config = config
 
     @property
     def name(self) -> str:
         """Возвращает имя агента."""
         return self._name
+
+    @property
+    def config(self) -> SingleAgentConfig:
+        """Возвращает конфигурацию агента."""
+        return self._config
 
     @property
     @abstractmethod
@@ -65,6 +78,26 @@ class BaseAgent(ABC):
 
         messages.append({"role": "user", "content": user_content})
         return messages
+
+    @staticmethod
+    def _build_job_description_block(job_description: str | None) -> str:
+        """
+        Формирует блок описания вакансии для включения в контекст агента.
+
+        :param job_description: Текст описания вакансии или None.
+        :return: Форматированный блок текста (пустая строка если описания нет).
+        """
+        if not job_description:
+            return ""
+
+        return (
+            "\n## ОПИСАНИЕ ВАКАНСИИ\n"
+            "Интервью проводится по конкретной вакансии. "
+            "Адаптируй свою работу под требования этой вакансии.\n"
+            "<job_description>\n"
+            f"{job_description}\n"
+            "</job_description>\n"
+        )
 
     @abstractmethod
     async def process(self, state: InterviewState, **kwargs: Any) -> Any:

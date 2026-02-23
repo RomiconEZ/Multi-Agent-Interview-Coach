@@ -190,6 +190,7 @@ class InterviewState(BaseModel):
 
     :ivar participant_name: ФИО кандидата (для лога).
     :ivar candidate: Информация о кандидате (извлекается из диалога).
+    :ivar job_description: Описание вакансии (опционально).
     :ivar turns: История ходов.
     :ivar current_turn: Текущий номер хода.
     :ivar current_difficulty: Текущий уровень сложности.
@@ -203,6 +204,7 @@ class InterviewState(BaseModel):
 
     participant_name: str = "Неизвестный кандидат"
     candidate: CandidateInfo = Field(default_factory=CandidateInfo)
+    job_description: str | None = None
     turns: list[InterviewTurn] = Field(default_factory=list)
     current_turn: int = 0
     current_difficulty: DifficultyLevel = DifficultyLevel.BASIC

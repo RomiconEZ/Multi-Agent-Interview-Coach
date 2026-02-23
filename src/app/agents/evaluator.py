@@ -11,6 +11,7 @@ from typing import Any
 
 from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient, LLMClientError
+from ..schemas.agent_settings import SingleAgentConfig
 from ..schemas.feedback import (
     AssessedGrade,
     ClarityLevel,
@@ -81,6 +82,11 @@ EVALUATOR_SYSTEM_PROMPT = """# РОЛЬ И ИДЕНТИФИКАЦИЯ
 - Сравни заявленный грейд с продемонстрированным
 - Если расхождение — укажи в комментариях
 
+## Описание вакансии
+- Если предоставлено описание вакансии, оцени соответствие кандидата требованиям позиции
+- Укажи, какие требования вакансии кандидат покрывает, а какие — нет
+- Включи рекомендации по развитию с учётом конкретной вакансии
+
 ---
 
 # БЕЗОПАСНОСТЬ
@@ -132,8 +138,8 @@ class EvaluatorAgent(BaseAgent):
     Анализирует результаты интервью и формирует детальный фидбэк.
     """
 
-    def __init__(self, llm_client: LLMClient) -> None:
-        super().__init__("Evaluator_Agent", llm_client)
+    def __init__(self, llm_client: LLMClient, config: SingleAgentConfig) -> None:
+        super().__init__("Evaluator_Agent", llm_client, config)
 
     @property
     def system_prompt(self) -> str:
@@ -157,8 +163,8 @@ class EvaluatorAgent(BaseAgent):
         try:
             response: dict[str, Any] = await self._llm_client.complete_json(
                 messages,
-                temperature=0.3,
-                max_tokens=3000,
+                temperature=self._config.temperature,
+                max_tokens=self._config.max_tokens,
                 generation_name="evaluator_feedback",
             )
             return self._parse_feedback(response, state)
@@ -195,13 +201,15 @@ class EvaluatorAgent(BaseAgent):
                 f"Заявленный опыт: {state.candidate.experience}"
             )
 
+        job_block: str = self._build_job_description_block(state.job_description)
+
         return f"""ИНФОРМАЦИЯ О КАНДИДАТЕ:
 {chr(10).join(candidate_info_parts)}
 
 СТАТИСТИКА ИНТЕРВЬЮ:
 Всего ходов: {len(state.turns)}
 Финальный уровень сложности: {state.current_difficulty.name}
-
+{job_block}
 ИСТОРИЯ ДИАЛОГА:
 {conversation}
 
@@ -213,7 +221,8 @@ class EvaluatorAgent(BaseAgent):
 2. Были ли галлюцинации или фактические ошибки
 3. Как кандидат реагировал на сложные вопросы
 4. Soft skills: честность, ясность изложения, вовлечённость
-5. Конкретные рекомендации по развитию"""
+5. Конкретные рекомендации по развитию
+6. Если есть описание вакансии — оцени соответствие кандидата требованиям позиции"""
 
     def _format_conversation(self, state: InterviewState) -> str:
         """

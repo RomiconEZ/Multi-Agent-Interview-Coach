@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
+import json
 import logging
-
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -15,10 +15,10 @@ from uuid import uuid4
 from langfuse.client import StatefulTraceClient
 
 from ..agents import EvaluatorAgent, InterviewerAgent, ObserverAgent
-from ..core.config import settings
 from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient, create_llm_client
 from ..observability import SessionMetrics, get_langfuse_tracker
+from ..schemas.agent_settings import AgentSettings, InterviewConfig
 from ..schemas.feedback import InterviewFeedback
 from ..schemas.interview import (
     AnswerQuality,
@@ -44,15 +44,17 @@ class InterviewSession:
         self,
         llm_client: LLMClient,
         interview_logger: InterviewLogger,
-        max_turns: int,
+        interview_config: InterviewConfig,
     ) -> None:
         self._llm_client = llm_client
         self._interview_logger = interview_logger
-        self._max_turns = max_turns
+        self._config = interview_config
 
-        self._observer = ObserverAgent(llm_client)
-        self._interviewer = InterviewerAgent(llm_client)
-        self._evaluator = EvaluatorAgent(llm_client)
+        agent_cfg: AgentSettings = interview_config.agent_settings
+
+        self._observer = ObserverAgent(llm_client, config=agent_cfg.observer)
+        self._interviewer = InterviewerAgent(llm_client, config=agent_cfg.interviewer)
+        self._evaluator = EvaluatorAgent(llm_client, config=agent_cfg.evaluator)
 
         self._state: InterviewState | None = None
         self._last_agent_message: str = ""
@@ -87,16 +89,22 @@ class InterviewSession:
 
         :return: Приветственное сообщение.
         """
-        self._state = InterviewState()
+        self._state = InterviewState(
+            job_description=self._config.job_description,
+        )
         self._session_id = str(uuid4())
+
+        trace_metadata: dict[str, Any] = {
+            "model": self._llm_client.model,
+            "max_turns": self._config.max_turns,
+        }
+        if self._config.job_description:
+            trace_metadata["has_job_description"] = True
 
         self._trace = self._langfuse.create_trace(
             name="interview_session",
             session_id=self._session_id,
-            metadata={
-                "model": self._llm_client.model,
-                "max_turns": self._max_turns,
-            },
+            metadata=trace_metadata,
         )
         self._llm_client.set_trace(self._trace, self._session_id)
 
@@ -211,7 +219,7 @@ class InterviewSession:
             metadata={"turn": self._state.current_turn},
         )
 
-        if self._state.current_turn >= self._max_turns:
+        if self._state.current_turn >= self._config.max_turns:
             self._state.is_active = False
             return response + "\n\n[Достигнут лимит вопросов. Формирую фидбэк...]", True
 
@@ -300,7 +308,7 @@ class InterviewSession:
         summary_path = self._interview_logger.save_session(self._state, feedback)
         detailed_path = self._interview_logger.save_raw_log(self._state, feedback)
 
-        # Сохраняем метрики в детальный лог (добавим отдельно)
+        # Сохраняем метрики в детальный лог
         if metrics:
             self._save_metrics_to_log(metrics, detailed_path)
 
@@ -313,8 +321,6 @@ class InterviewSession:
         :param metrics: Метрики сессии.
         :param log_path: Путь к файлу лога.
         """
-        import json
-
         try:
             with log_path.open("r", encoding="utf-8") as f:
                 log_data = json.load(f)
@@ -377,9 +383,10 @@ class InterviewSession:
             },
         )
 
-    def _parse_grade(self, grade_str: str) -> GradeLevel:
+    @staticmethod
+    def _parse_grade(grade_str: str) -> GradeLevel:
         """Парсит строку грейда."""
-        mapping = {
+        mapping: dict[str, GradeLevel] = {
             "intern": GradeLevel.INTERN,
             "junior": GradeLevel.JUNIOR,
             "middle": GradeLevel.MIDDLE,
@@ -388,9 +395,10 @@ class InterviewSession:
         }
         return mapping.get(grade_str.lower(), GradeLevel.JUNIOR)
 
-    def _get_initial_difficulty(self, grade: GradeLevel) -> DifficultyLevel:
+    @staticmethod
+    def _get_initial_difficulty(grade: GradeLevel) -> DifficultyLevel:
         """Определяет начальную сложность по грейду."""
-        mapping = {
+        mapping: dict[GradeLevel, DifficultyLevel] = {
             GradeLevel.INTERN: DifficultyLevel.BASIC,
             GradeLevel.JUNIOR: DifficultyLevel.BASIC,
             GradeLevel.MIDDLE: DifficultyLevel.INTERMEDIATE,
@@ -419,7 +427,7 @@ class InterviewSession:
                         self._state.confirmed_skills.append(topic)
 
         if not analysis.is_factually_correct or analysis.quality == AnswerQuality.WRONG:
-            gap = {
+            gap: dict[str, str] = {
                 "topic": (
                     ", ".join(analysis.detected_topics)
                     if analysis.detected_topics
@@ -437,18 +445,20 @@ class InterviewSession:
         logger.info(f"Interview session closed, session_id={self._session_id}")
 
 
-async def create_interview_session(model: str | None = None) -> InterviewSession:
+async def create_interview_session(
+    interview_config: InterviewConfig,
+) -> InterviewSession:
     """
     Создаёт новую сессию интервью.
 
-    :param model: Имя модели LLM (по умолчанию из конфигурации).
+    :param interview_config: Конфигурация интервью.
     :return: Экземпляр InterviewSession.
     """
-    llm_client = create_llm_client(model)
-    interview_logger = create_interview_logger()
+    llm_client: LLMClient = create_llm_client(interview_config.model)
+    interview_logger: InterviewLogger = create_interview_logger()
 
     return InterviewSession(
         llm_client=llm_client,
         interview_logger=interview_logger,
-        max_turns=settings.MAX_TURNS,
+        interview_config=interview_config,
     )

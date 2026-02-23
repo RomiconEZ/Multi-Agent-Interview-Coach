@@ -11,6 +11,7 @@ from typing import Any
 
 from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient, LLMClientError
+from ..schemas.agent_settings import SingleAgentConfig
 from ..schemas.interview import (
     AnswerQuality,
     InternalThought,
@@ -101,7 +102,7 @@ OBSERVER_SYSTEM_PROMPT = """# OBSERVER AGENT — Агент-Наблюдател
   - Запрет: НЕ предлагать новые задачи/примеры/сценарии (например "система библиотеки") и НЕ задавать новый технический вопрос.
   - Запрет: НЕ задавать уточняющих вопросов по теме компании/процессов после ответа.
 
-### 4.### 4. ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ
+### 4. ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ
 Из сообщений извлекай:
 - name, position, grade, experience, technologies
 
@@ -109,6 +110,13 @@ OBSERVER_SYSTEM_PROMPT = """# OBSERVER AGENT — Агент-Наблюдател
 Распознавай намерение закончить:
 - "стоп", "хватит", "давай фидбэк", "стоп игра"
 - response_type = "stop_command"
+
+### 6. ОПИСАНИЕ ВАКАНСИИ
+Если предоставлено описание вакансии, используй его для:
+- Оценки релевантности ответов кандидата требованиям позиции
+- Проверки соответствия опыта и навыков требованиям вакансии
+- Формулирования более точных рекомендаций для Interviewer
+- Указания в detected_topics тем, которые соответствуют вакансии
 
 ---
 
@@ -182,8 +190,8 @@ class ObserverAgent(BaseAgent):
     Анализирует ответы кандидата, выявляет галлюцинации и даёт рекомендации.
     """
 
-    def __init__(self, llm_client: LLMClient) -> None:
-        super().__init__("Observer_Agent", llm_client)
+    def __init__(self, llm_client: LLMClient, config: SingleAgentConfig) -> None:
+        super().__init__("Observer_Agent", llm_client, config)
 
     @property
     def system_prompt(self) -> str:
@@ -211,8 +219,8 @@ class ObserverAgent(BaseAgent):
         try:
             response: dict[str, Any] = await self._llm_client.complete_json(
                 messages,
-                temperature=0.3,
-                max_tokens=1000,
+                temperature=self._config.temperature,
+                max_tokens=self._config.max_tokens,
                 generation_name="observer_analysis",
             )
             return self._parse_analysis(response, user_message)
@@ -255,6 +263,8 @@ class ObserverAgent(BaseAgent):
             else "Не указаны"
         )
 
+        job_block: str = self._build_job_description_block(state.job_description)
+
         return f"""## КОНТЕКСТ ИНТЕРВЬЮ
 
 **Кандидат:** {candidate_name}
@@ -263,7 +273,7 @@ class ObserverAgent(BaseAgent):
 **Опыт:** {candidate_experience}
 **Технологии:** {candidate_technologies}
 **Сложность:** {state.current_difficulty.name}
-
+{job_block}
 ## ИСТОРИЯ
 {history_summary}
 

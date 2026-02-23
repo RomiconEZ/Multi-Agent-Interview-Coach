@@ -2,6 +2,7 @@
 Модуль схем данных.
 """
 
+from .agent_settings import AgentSettings, InterviewConfig, SingleAgentConfig
 from .EnvironmentOption import EnvironmentOption
 from .feedback import (
     AssessedGrade,
@@ -32,6 +33,9 @@ from .interview import (
 
 __all__ = [
     "EnvironmentOption",
+    "AgentSettings",
+    "InterviewConfig",
+    "SingleAgentConfig",
     "AssessedGrade",
     "ClarityLevel",
     "HiringRecommendation",

@@ -11,6 +11,7 @@ from typing import Any
 
 from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient, LLMClientError
+from ..schemas.agent_settings import SingleAgentConfig
 from ..schemas.interview import (
     DifficultyLevel,
     InternalThought,
@@ -48,6 +49,12 @@ INTERVIEWER_SYSTEM_PROMPT = """# РОЛЬ И ИДЕНТИФИКАЦИЯ
 - Если кандидат указал Python, Django, SQL → спрашивай про Python, Django, SQL
 - НИКОГДА не спрашивай про технологии, которые кандидат НЕ упоминал
 - Если технологии неизвестны → сначала спроси о них
+
+## 1.1 Описание вакансии
+- Если предоставлено описание вакансии, адаптируй вопросы к требованиям позиции
+- Фокусируйся на технологиях и навыках, указанных в вакансии
+- Проверяй соответствие кандидата ожиданиям описания
+- Если описание вакансии содержит конкретный стек — приоритизируй вопросы по этому стеку
 
 ## 2. Адаптивность сложности
 | Уровень | Фокус вопросов |
@@ -117,7 +124,7 @@ INTERVIEWER_SYSTEM_PROMPT = """# РОЛЬ И ИДЕНТИФИКАЦИЯ
 - "Какие задачи на испытательном сроке? Вы используете микросервисы?" →
   "Хороший вопрос! Обычно на испытательном сроке новые разработчики погружаются в кодовую базу, берут первые задачи с поддержкой ментора и знакомятся с процессами. По архитектуре зависит от проекта: где-то монолит, где-то микросервисы. Детали обсудим после технической части. А теперь вернёмся к моему вопросу: <повтори активный вопрос>."
 
-## 7. Один вопрос за раз## 7. Один вопрос за раз
+## 7. Один вопрос за раз
 - Задавай только ОДИН технический вопрос
 - Дожидайся ответа
 - Не задавай несколько вопросов в одном сообщении
@@ -161,8 +168,8 @@ class InterviewerAgent(BaseAgent):
     Ведёт диалог, задаёт вопросы, учитывает рекомендации наблюдателя.
     """
 
-    def __init__(self, llm_client: LLMClient) -> None:
-        super().__init__("Interviewer_Agent", llm_client)
+    def __init__(self, llm_client: LLMClient, config: SingleAgentConfig) -> None:
+        super().__init__("Interviewer_Agent", llm_client, config)
 
     @property
     def system_prompt(self) -> str:
@@ -176,20 +183,44 @@ class InterviewerAgent(BaseAgent):
         :param state: Состояние интервью.
         :return: Приветственное сообщение.
         """
-        context = """Начни техническое интервью.
+        job_block: str = self._build_job_description_block(state.job_description)
 
-Ты ещё не знаешь имени кандидата. Поприветствуй его и попроси представиться и рассказать о своём опыте.
+        context_parts: list[str] = [
+            "Начни техническое интервью.",
+            "",
+            "Ты ещё не знаешь имени кандидата. "
+            "Поприветствуй его и попроси представиться и рассказать о своём опыте.",
+        ]
 
-Пример: "Привет! Расскажи про свой опыт в программировании." или "Здравствуйте! Расскажите немного о себе и своём опыте."
+        if state.job_description:
+            context_parts.extend(
+                [
+                    "",
+                    "Для этого интервью есть описание вакансии. "
+                    "Упомяни кратко, на какую позицию проводится интервью, "
+                    "но НЕ зачитывай полное описание.",
+                    job_block,
+                ]
+            )
+        else:
+            context_parts.extend(
+                [
+                    "",
+                    'Пример: "Привет! Расскажи про свой опыт в программировании." '
+                    'или "Здравствуйте! Расскажите немного о себе и своём опыте."',
+                    "",
+                    "НЕ спрашивай про конкретную технологию пока не знаешь, "
+                    "на какую позицию претендует кандидат.",
+                ]
+            )
 
-НЕ спрашивай про конкретную технологию пока не знаешь, на какую позицию претендует кандидат."""
-
+        context: str = "\n".join(context_parts)
         messages: list[dict[str, str]] = self._build_messages(context)
 
         try:
             response: str = await self._llm_client.complete(
                 messages,
-                temperature=0.7,
+                temperature=self._config.temperature,
                 max_tokens=300,
                 generation_name="interviewer_greeting",
             )
@@ -237,8 +268,8 @@ class InterviewerAgent(BaseAgent):
         try:
             response: str = await self._llm_client.complete(
                 messages,
-                temperature=0.7,
-                max_tokens=800,
+                temperature=self._config.temperature,
+                max_tokens=self._config.max_tokens,
                 generation_name="interviewer_response",
             )
             return response.strip(), thoughts
@@ -291,6 +322,10 @@ class InterviewerAgent(BaseAgent):
 
         if not any([state.candidate.name, state.candidate.position]):
             context_parts.append("- (Данные ещё не известны - кандидат представляется)")
+
+        job_block: str = self._build_job_description_block(state.job_description)
+        if job_block:
+            context_parts.append(job_block)
 
         last_agent_message: str = (
             state.turns[-1].agent_visible_message if state.turns else ""

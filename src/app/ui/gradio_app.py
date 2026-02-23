@@ -1,12 +1,14 @@
 """
 Gradio интерфейс для Multi-Agent Interview Coach.
+
+Предоставляет профессиональный пользовательский интерфейс
+для проведения тренировочных технических интервью с AI-агентами.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,13 @@ import gradio as gr
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger, setup_logging
 from ..interview import InterviewSession, create_interview_session
+from ..llm.models import get_models_for_ui
+from ..schemas.agent_settings import (
+    AgentSettings,
+    InterviewConfig,
+    SingleAgentConfig,
+)
+from .styles import HEADER_HTML, MAIN_CSS
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -24,6 +33,12 @@ _last_detailed_log_path: Path | None = None
 
 
 def _run_async(coro: Any) -> Any:
+    """
+    Выполняет корутину в синхронном контексте Gradio.
+
+    :param coro: Корутина для выполнения.
+    :return: Результат выполнения корутины.
+    """
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
@@ -38,13 +53,60 @@ def _run_async(coro: Any) -> Any:
     return loop.run_until_complete(coro)
 
 
+def _build_interview_config(
+    model: str,
+    max_turns: int,
+    job_description: str,
+    obs_temp: float,
+    obs_tokens: int,
+    int_temp: float,
+    int_tokens: int,
+    eval_temp: float,
+    eval_tokens: int,
+) -> InterviewConfig:
+    """
+    Собирает конфигурацию интервью из параметров UI.
+
+    :param model: Имя модели LLM.
+    :param max_turns: Максимальное количество ходов.
+    :param job_description: Описание вакансии.
+    :param obs_temp: Температура Observer.
+    :param obs_tokens: Макс. токенов Observer.
+    :param int_temp: Температура Interviewer.
+    :param int_tokens: Макс. токенов Interviewer.
+    :param eval_temp: Температура Evaluator.
+    :param eval_tokens: Макс. токенов Evaluator.
+    :return: Конфигурация интервью.
+    """
+    return InterviewConfig(
+        model=model.strip() if model and model.strip() else None,
+        max_turns=max_turns,
+        job_description=job_description.strip()
+        if job_description and job_description.strip()
+        else None,
+        agent_settings=AgentSettings(
+            observer=SingleAgentConfig(temperature=obs_temp, max_tokens=obs_tokens),
+            interviewer=SingleAgentConfig(temperature=int_temp, max_tokens=int_tokens),
+            evaluator=SingleAgentConfig(temperature=eval_temp, max_tokens=eval_tokens),
+        ),
+    )
+
+
 async def _start_interview_async(
     model: str,
-) -> tuple[str, str, list[tuple[str | None, str | None]]]:
+    max_turns: int,
+    job_description: str,
+    obs_temp: float,
+    obs_tokens: int,
+    int_temp: float,
+    int_tokens: int,
+    eval_temp: float,
+    eval_tokens: int,
+) -> tuple[str, str, list[dict[str, str | None]], str, str | None, str | None]:
     """
-    Асинхронно начинает интервью.
+    Асинхронно начинает новое интервью.
 
-    :return: Tuple (статус, очищенный инпут, история чата).
+    :return: Tuple (статус, очищенный инпут, история чата, фидбэк, лог, детальный лог).
     """
     global _current_session, _last_log_path, _last_detailed_log_path
 
@@ -54,50 +116,92 @@ async def _start_interview_async(
     _last_log_path = None
     _last_detailed_log_path = None
 
-    model_name = model.strip() if model.strip() else None
-    _current_session = await create_interview_session(model_name)
+    config: InterviewConfig = _build_interview_config(
+        model,
+        max_turns,
+        job_description,
+        obs_temp,
+        obs_tokens,
+        int_temp,
+        int_tokens,
+        eval_temp,
+        eval_tokens,
+    )
 
-    greeting = await _current_session.start()
+    _current_session = await create_interview_session(config)
+    greeting: str = await _current_session.start()
 
-    status = f"✅ Интервью начато | Модель: {_current_session._llm_client.model}"
-    history: list[tuple[str | None, str | None]] = [(None, greeting)]
+    actual_model: str = _current_session._llm_client.model
+    jd_indicator: str = " | 📋 Вакансия задана" if config.job_description else ""
+    status: str = f"✅ Интервью начато | Модель: {actual_model}{jd_indicator}"
+    history: list[dict[str, str | None]] = [{"role": "assistant", "content": greeting}]
 
-    return status, "", history
+    return status, "", history, "", None, None
 
 
-def start_interview(model: str) -> tuple[str, str, list[tuple[str | None, str | None]]]:
+def start_interview(
+    model: str,
+    max_turns: int,
+    job_description: str,
+    obs_temp: float,
+    obs_tokens: int,
+    int_temp: float,
+    int_tokens: int,
+    eval_temp: float,
+    eval_tokens: int,
+) -> tuple[str, str, list[dict[str, str | None]], str, str | None, str | None]:
     """Синхронная обёртка для старта интервью."""
-    return _run_async(_start_interview_async(model))
+    return _run_async(
+        _start_interview_async(
+            model,
+            max_turns,
+            job_description,
+            obs_temp,
+            obs_tokens,
+            int_temp,
+            int_tokens,
+            eval_temp,
+            eval_tokens,
+        )
+    )
 
 
 async def _send_message_async(
     message: str,
-    history: list[tuple[str | None, str | None]],
-) -> tuple[str, str, list[tuple[str | None, str | None]], str, str | None, str | None]:
+    history: list[dict[str, str | None]],
+) -> tuple[str, str, list[dict[str, str | None]], str, str | None, str | None]:
     """
-    Асинхронно обрабатывает сообщение.
+    Асинхронно обрабатывает сообщение кандидата.
 
-    :return: Tuple (статус, очищенный инпут, история, фидбэк, путь_лог, путь_детальный).
+    :param message: Текст сообщения.
+    :param history: Текущая история чата.
+    :return: Tuple (статус, очищенный инпут, история, фидбэк, лог, детальный лог).
     """
     global _current_session, _last_log_path, _last_detailed_log_path
 
     if _current_session is None:
-        return "❌ Сначала начните интервью", message, history, "", None, None
+        return "⚠️ Сначала начните интервью", message, history, "", None, None
 
     if not message.strip():
-        return "❌ Введите сообщение", "", history, "", None, None
+        return "⚠️ Введите сообщение", "", history, "", None, None
 
-    history.append((message, None))
+    history = list(history)
+    history.append({"role": "user", "content": message})
 
+    response: str
+    is_finished: bool
     response, is_finished = await _current_session.process_message(message.strip())
 
-    history[-1] = (message, response)
+    history.append({"role": "assistant", "content": response})
 
     if is_finished:
-        feedback, summary_path, detailed_path = await _current_session.generate_feedback()
-        feedback_text = feedback.to_formatted_string()
+        (
+            feedback,
+            summary_path,
+            detailed_path,
+        ) = await _current_session.generate_feedback()
+        feedback_text: str = feedback.to_formatted_string()
 
-        # Добавляем метрики токенов
         metrics = _current_session.get_session_metrics()
         if metrics:
             feedback_text += "\n\n" + metrics.to_summary_string()
@@ -105,39 +209,52 @@ async def _send_message_async(
         _last_log_path = summary_path
         _last_detailed_log_path = detailed_path
 
-        status = "✅ Интервью завершено. Фидбэк сгенерирован."
-        return status, "", history, feedback_text, str(summary_path), str(detailed_path)
+        return (
+            "✅ Интервью завершено. Фидбэк сгенерирован.",
+            "",
+            history,
+            feedback_text,
+            str(summary_path),
+            str(detailed_path),
+        )
 
-    status = (
-        f"✅ Ход {_current_session.state.current_turn if _current_session.state else '?'}"
+    current_turn: str = str(
+        _current_session.state.current_turn if _current_session.state else "?"
     )
+    max_turns: str = str(_current_session._config.max_turns)
+    status = f"💬 Ход {current_turn}/{max_turns}"
+
     return status, "", history, "", None, None
 
 
 def send_message(
     message: str,
-    history: list[tuple[str | None, str | None]],
-) -> tuple[str, str, list[tuple[str | None, str | None]], str, str | None, str | None]:
+    history: list[dict[str, str | None]],
+) -> tuple[str, str, list[dict[str, str | None]], str, str | None, str | None]:
     """Синхронная обёртка для отправки сообщения."""
     return _run_async(_send_message_async(message, history))
 
 
 async def _stop_interview_async(
-    history: list[tuple[str | None, str | None]],
-) -> tuple[str, list[tuple[str | None, str | None]], str, str | None, str | None]:
-    """Асинхронно завершает интервью."""
+    history: list[dict[str, str | None]],
+) -> tuple[str, list[dict[str, str | None]], str, str | None, str | None]:
+    """
+    Асинхронно завершает интервью и генерирует фидбэк.
+
+    :param history: История чата.
+    :return: Tuple (статус, история, фидбэк, лог, детальный лог).
+    """
     global _current_session, _last_log_path, _last_detailed_log_path
 
     if _current_session is None:
-        return "❌ Нет активного интервью", history, "", None, None
+        return "⚠️ Нет активного интервью", history, "", None, None
 
     if _current_session._state:
         _current_session._state.is_active = False
 
     feedback, summary_path, detailed_path = await _current_session.generate_feedback()
-    feedback_text = feedback.to_formatted_string()
+    feedback_text: str = feedback.to_formatted_string()
 
-    # Добавляем метрики токенов
     metrics = _current_session.get_session_metrics()
     if metrics:
         feedback_text += "\n\n" + metrics.to_summary_string()
@@ -145,7 +262,11 @@ async def _stop_interview_async(
     _last_log_path = summary_path
     _last_detailed_log_path = detailed_path
 
-    history.append(("Стоп интервью", "Интервью завершено. Формирую фидбэк..."))
+    history = list(history)
+    history.append({"role": "user", "content": "Стоп интервью"})
+    history.append(
+        {"role": "assistant", "content": "Интервью завершено. Формирую фидбэк..."}
+    )
 
     return (
         "✅ Интервью завершено",
@@ -157,100 +278,363 @@ async def _stop_interview_async(
 
 
 def stop_interview(
-    history: list[tuple[str | None, str | None]],
-) -> tuple[str, list[tuple[str | None, str | None]], str, str | None, str | None]:
+    history: list[dict[str, str | None]],
+) -> tuple[str, list[dict[str, str | None]], str, str | None, str | None]:
+    """Синхронная обёртка для завершения интервью."""
     return _run_async(_stop_interview_async(history))
 
 
+async def _reset_interview_async() -> tuple[
+    str, str, list[dict[str, str | None]], str, str | None, str | None
+]:
+    """
+    Асинхронно сбрасывает текущее интервью.
+
+    Закрывает активную сессию и очищает все данные интерфейса
+    для начала нового интервью.
+
+    :return: Tuple (статус, очищенный инпут, пустая история, пустой фидбэк, None, None).
+    """
+    global _current_session, _last_log_path, _last_detailed_log_path
+
+    if _current_session is not None:
+        await _current_session.close()
+        _current_session = None
+
+    _last_log_path = None
+    _last_detailed_log_path = None
+
+    return (
+        "🔄 Сессия сброшена. Настройте параметры и начните новое интервью.",
+        "",
+        [],
+        "",
+        None,
+        None,
+    )
+
+
+def reset_interview() -> tuple[
+    str, str, list[dict[str, str | None]], str, str | None, str | None
+]:
+    """Синхронная обёртка для сброса интервью."""
+    return _run_async(_reset_interview_async())
+
+
+def refresh_models() -> gr.update:
+    """
+    Обновляет список моделей из LiteLLM API.
+
+    :return: Обновление компонента Dropdown со списком моделей.
+    """
+    models: list[str] = get_models_for_ui()
+    default_value: str = settings.LITELLM_MODEL
+    value: str = (
+        default_value if default_value in models else (models[0] if models else "")
+    )
+    return gr.update(choices=models, value=value)
+
+
 def create_gradio_interface() -> gr.Blocks:
-    with gr.Blocks(title="Multi-Agent Interview Coach", theme=gr.themes.Soft()) as app:
-        gr.Markdown(
-            """
-            # 🎯 Multi-Agent Interview Coach
+    """
+    Создаёт Gradio интерфейс приложения.
 
-            Система технического интервью с AI-агентами:
-            - **Observer Agent** — анализирует ответы, выявляет галлюцинации
-            - **Interviewer Agent** — ведёт диалог, адаптирует сложность
-            - **Evaluator Agent** — формирует финальный фидбэк
+    :return: Объект Gradio Blocks с полностью настроенным интерфейсом.
+    """
+    initial_models: list[str] = get_models_for_ui()
+    default_model: str = settings.LITELLM_MODEL
+    initial_model_value: str = (
+        default_model
+        if default_model in initial_models
+        else (initial_models[0] if initial_models else "")
+    )
 
-            **Как использовать:**
-            1. Нажмите "🚀 Начать интервью"
-            2. Представьтесь (имя, позиция, опыт)
-            3. Отвечайте на вопросы
-            4. Скажите "стоп" для получения фидбэка
-            """
-        )
+    with gr.Blocks(
+        title="Multi-Agent Interview Coach",
+        theme=gr.themes.Base(
+            primary_hue=gr.themes.colors.indigo,
+            secondary_hue=gr.themes.colors.purple,
+            neutral_hue=gr.themes.colors.slate,
+            font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
+            font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "Consolas", "monospace"],
+        ).set(
+            body_background_fill="#0f1117",
+            body_background_fill_dark="#0f1117",
+            block_background_fill="#1a1b26",
+            block_background_fill_dark="#1a1b26",
+            block_border_color="rgba(99, 102, 241, 0.15)",
+            block_border_color_dark="rgba(99, 102, 241, 0.15)",
+            block_label_text_color="#94a3b8",
+            block_label_text_color_dark="#94a3b8",
+            block_title_text_color="#e2e8f0",
+            block_title_text_color_dark="#e2e8f0",
+            input_background_fill="#24253a",
+            input_background_fill_dark="#24253a",
+            input_border_color="rgba(99, 102, 241, 0.15)",
+            input_border_color_dark="rgba(99, 102, 241, 0.15)",
+            button_primary_background_fill="#6366f1",
+            button_primary_background_fill_dark="#6366f1",
+            button_primary_background_fill_hover="#4f46e5",
+            button_primary_background_fill_hover_dark="#4f46e5",
+            button_primary_text_color="white",
+            button_primary_text_color_dark="white",
+            body_text_color="#e2e8f0",
+            body_text_color_dark="#e2e8f0",
+            body_text_color_subdued="#94a3b8",
+            body_text_color_subdued_dark="#94a3b8",
+        ),
+        css=MAIN_CSS,
+    ) as app:
+        # ── Header ──────────────────────────────────────────────────────
+        gr.HTML(HEADER_HTML)
 
-        with gr.Row():
-            with gr.Column(scale=1):
-                gr.Markdown("### ⚙️ Настройки")
+        # ── Main Layout ─────────────────────────────────────────────────
+        with gr.Row(equal_height=False):
+            # ── Left Column: Settings ────────────────────────────────────
+            with gr.Column(scale=3, min_width=320):
+                with gr.Group(elem_classes=["settings-panel"]):
+                    gr.HTML('<div class="panel-title">⚙️ Настройки интервью</div>')
 
-                model_input = gr.Textbox(
-                    label="Модель LLM (опционально)",
-                    placeholder=settings.LITELLM_MODEL,
-                    value="",
-                )
+                    # Model selection
+                    with gr.Accordion("🤖 Модель LLM", open=True):
+                        with gr.Row():
+                            model_dropdown = gr.Dropdown(
+                                label="Модель",
+                                choices=initial_models,
+                                value=initial_model_value,
+                                interactive=True,
+                                elem_classes=["model-selector"],
+                                scale=5,
+                            )
+                            refresh_btn = gr.Button(
+                                "🔄",
+                                scale=1,
+                                min_width=42,
+                                size="sm",
+                            )
 
-                start_btn = gr.Button("🚀 Начать интервью", variant="primary")
-                stop_btn = gr.Button("🛑 Завершить и получить фидбэк", variant="stop")
+                        max_turns_slider = gr.Slider(
+                            label="Макс. ходов интервью",
+                            minimum=5,
+                            maximum=50,
+                            value=settings.MAX_TURNS,
+                            step=1,
+                        )
 
-                status_output = gr.Textbox(label="Статус", interactive=False)
+                    # Job description
+                    with gr.Accordion("📋 Описание вакансии", open=False):
+                        job_description_input = gr.Textbox(
+                            label="Описание позиции",
+                            placeholder=(
+                                "Опишите вакансию, требования к кандидату, "
+                                "стек технологий, обязанности...\n\n"
+                                "Если оставить пустым — интервью будет общим."
+                            ),
+                            lines=6,
+                            max_lines=15,
+                            elem_classes=["job-desc-input"],
+                        )
 
-            with gr.Column(scale=2):
-                gr.Markdown("### 💬 Диалог")
+                    # Agent settings
+                    with gr.Accordion("🛠️ Параметры агентов", open=False):
+                        gr.HTML(
+                            '<p class="hint-text">'
+                            "Температура: 0 — точный, 1+ — креативный. "
+                            "Токены: максимум длины ответа агента."
+                            "</p>"
+                        )
 
-                chatbot = gr.Chatbot(label="Интервью", height=400, type="tuples")
+                        with gr.Accordion("👁️ Observer", open=False):
+                            with gr.Group(elem_classes=["agent-config-section"]):
+                                obs_temp = gr.Slider(
+                                    label="Температура",
+                                    minimum=0.0,
+                                    maximum=1.5,
+                                    value=0.3,
+                                    step=0.05,
+                                )
+                                obs_tokens = gr.Slider(
+                                    label="Макс. токенов",
+                                    minimum=256,
+                                    maximum=4096,
+                                    value=1000,
+                                    step=64,
+                                )
 
-                with gr.Row():
-                    msg_input = gr.Textbox(
-                        label="Ваш ответ",
-                        placeholder="Введите ответ...",
-                        lines=2,
-                        scale=4,
+                        with gr.Accordion("🎤 Interviewer", open=False):
+                            with gr.Group(elem_classes=["agent-config-section"]):
+                                int_temp = gr.Slider(
+                                    label="Температура",
+                                    minimum=0.0,
+                                    maximum=1.5,
+                                    value=0.7,
+                                    step=0.05,
+                                )
+                                int_tokens = gr.Slider(
+                                    label="Макс. токенов",
+                                    minimum=256,
+                                    maximum=4096,
+                                    value=800,
+                                    step=64,
+                                )
+
+                        with gr.Accordion("📊 Evaluator", open=False):
+                            with gr.Group(elem_classes=["agent-config-section"]):
+                                eval_temp = gr.Slider(
+                                    label="Температура",
+                                    minimum=0.0,
+                                    maximum=1.5,
+                                    value=0.3,
+                                    step=0.05,
+                                )
+                                eval_tokens = gr.Slider(
+                                    label="Макс. токенов",
+                                    minimum=512,
+                                    maximum=8192,
+                                    value=3000,
+                                    step=128,
+                                )
+
+                    # Action buttons
+                    gr.HTML('<hr class="section-divider">')
+
+                    start_btn = gr.Button(
+                        "🚀 Начать интервью",
+                        variant="primary",
+                        elem_classes=["btn-start"],
                     )
-                    send_btn = gr.Button("📤 Отправить", scale=1)
 
-        with gr.Row():
-            with gr.Column():
-                gr.Markdown("### 📊 Финальный фидбэк")
-                feedback_output = gr.Textbox(label="Фидбэк", lines=20, interactive=False)
+                    with gr.Row():
+                        stop_btn = gr.Button(
+                            "🛑 Завершить",
+                            variant="stop",
+                            elem_classes=["btn-stop"],
+                            scale=1,
+                        )
+                        reset_btn = gr.Button(
+                            "🔄 Сбросить",
+                            variant="secondary",
+                            elem_classes=["btn-reset"],
+                            scale=1,
+                        )
 
-            with gr.Column():
-                gr.Markdown("### 📁 Скачать логи")
+                    status_output = gr.Textbox(
+                        label="Статус",
+                        value="⏳ Настройте параметры и нажмите «Начать интервью»",
+                        interactive=False,
+                        elem_classes=["status-bar"],
+                    )
 
-                main_log_file = gr.File(label="📄 Основной лог", interactive=False)
-                detailed_log_file = gr.File(label="📄 Детальный лог", interactive=False)
+            # ── Right Column: Chat + Feedback ────────────────────────────
+            with gr.Column(scale=7, min_width=480):
+                with gr.Tabs() as tabs:
+                    # Tab 1: Interview Chat
+                    with gr.TabItem("💬 Интервью", id=0):
+                        chatbot = gr.Chatbot(
+                            label="Диалог с интервьюером",
+                            height=480,
+                            type="messages",
+                            elem_classes=["chat-area"],
+                            show_copy_button=True,
+                            avatar_images=(None, None),
+                            placeholder=(
+                                "<center>"
+                                "<br><br>"
+                                "<h3 style='color: #64748b;'>🎯 Добро пожаловать!</h3>"
+                                "<p style='color: #475569; font-size: 0.9rem;'>"
+                                "Настройте параметры слева и нажмите "
+                                "<strong>«Начать интервью»</strong> для начала."
+                                "</p>"
+                                "</center>"
+                            ),
+                        )
+
+                        with gr.Row():
+                            msg_input = gr.Textbox(
+                                label="Ваш ответ",
+                                placeholder="Введите ваш ответ и нажмите Enter или кнопку «Отправить»...",
+                                lines=2,
+                                max_lines=6,
+                                scale=6,
+                                elem_classes=["input-area"],
+                            )
+                            send_btn = gr.Button(
+                                "📤",
+                                scale=1,
+                                min_width=60,
+                                elem_classes=["btn-send"],
+                            )
+
+                    # Tab 2: Feedback
+                    with gr.TabItem("📊 Фидбэк", id=1):
+                        with gr.Group(elem_classes=["feedback-panel"]):
+                            feedback_output = gr.Textbox(
+                                label="Финальная оценка",
+                                lines=25,
+                                max_lines=50,
+                                interactive=False,
+                                show_copy_button=True,
+                                placeholder="Фидбэк появится здесь после завершения интервью...",
+                            )
+
+                        with gr.Row(elem_classes=["download-section"]):
+                            main_log_file = gr.File(
+                                label="📄 Основной лог",
+                                interactive=False,
+                                scale=1,
+                            )
+                            detailed_log_file = gr.File(
+                                label="📄 Детальный лог",
+                                interactive=False,
+                                scale=1,
+                            )
+
+        # ── Shared inputs for agent settings ─────────────────────────────
+        settings_inputs: list[gr.components.Component] = [
+            model_dropdown,
+            max_turns_slider,
+            job_description_input,
+            obs_temp,
+            obs_tokens,
+            int_temp,
+            int_tokens,
+            eval_temp,
+            eval_tokens,
+        ]
+
+        all_outputs: list[gr.components.Component] = [
+            status_output,
+            msg_input,
+            chatbot,
+            feedback_output,
+            main_log_file,
+            detailed_log_file,
+        ]
+
+        # ── Event Handlers ───────────────────────────────────────────────
+
+        refresh_btn.click(
+            fn=refresh_models,
+            inputs=[],
+            outputs=[model_dropdown],
+        )
 
         start_btn.click(
             fn=start_interview,
-            inputs=[model_input],
-            outputs=[status_output, msg_input, chatbot],
+            inputs=settings_inputs,
+            outputs=all_outputs,
         )
 
         send_btn.click(
             fn=send_message,
             inputs=[msg_input, chatbot],
-            outputs=[
-                status_output,
-                msg_input,
-                chatbot,
-                feedback_output,
-                main_log_file,
-                detailed_log_file,
-            ],
+            outputs=all_outputs,
         )
 
         msg_input.submit(
             fn=send_message,
             inputs=[msg_input, chatbot],
-            outputs=[
-                status_output,
-                msg_input,
-                chatbot,
-                feedback_output,
-                main_log_file,
-                detailed_log_file,
-            ],
+            outputs=all_outputs,
         )
 
         stop_btn.click(
@@ -265,13 +649,19 @@ def create_gradio_interface() -> gr.Blocks:
             ],
         )
 
+        reset_btn.click(
+            fn=reset_interview,
+            inputs=[],
+            outputs=all_outputs,
+        )
+
     return app
 
 
 def launch_app(
-    server_name: str = "0.0.0.0",
-    server_port: int = 7860,
-    share: bool = False,
+    server_name: str,
+    server_port: int,
+    share: bool,
 ) -> None:
     """
     Запускает Gradio приложение.
@@ -283,5 +673,5 @@ def launch_app(
     setup_logging()
     logger.info(f"Launching Gradio app on {server_name}:{server_port}")
 
-    app = create_gradio_interface()
+    app: gr.Blocks = create_gradio_interface()
     app.launch(server_name=server_name, server_port=server_port, share=share)
