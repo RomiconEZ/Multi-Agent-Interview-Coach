@@ -58,6 +58,7 @@ class LLMClient:
         self._langfuse = get_langfuse_tracker()
         self._current_trace: StatefulTraceClient | None = None
         self._session_id: str | None = None
+        self._json_mode_supported: bool = True
 
     @property
     def model(self) -> str:
@@ -120,6 +121,19 @@ class LLMClient:
         :return: Задержка в секундах.
         """
         return min(_RETRY_BACKOFF_BASE * (2**attempt), _RETRY_BACKOFF_MAX)
+
+    @staticmethod
+    def _is_json_mode_unsupported_error(error_text: str) -> bool:
+        """
+        Проверяет, связана ли ошибка HTTP 400 с неподдерживаемым response_format.
+
+        :param error_text: Тело ответа с ошибкой.
+        :return: True если ошибка вызвана response_format.
+        """
+        lower: str = error_text.lower()
+        return "response_format" in lower or (
+            "json_object" in lower and ("400" in lower or "bad" in lower)
+        )
 
     async def complete(
         self,
@@ -309,7 +323,12 @@ class LLMClient:
         Выполняет запрос к LLM с ожиданием JSON ответа.
 
         Использует ``response_format`` для принудительного JSON-вывода
-        и робастное извлечение JSON из текстового ответа.
+        когда модель поддерживает эту возможность. Если модель не поддерживает
+        ``response_format`` (ошибка HTTP 400), автоматически переключается
+        на текстовый режим и извлекает JSON из ответа.
+
+        Состояние поддержки кешируется: после первой ошибки все последующие
+        вызовы сразу используют текстовый режим без лишних запросов.
 
         :param messages: Список сообщений.
         :param temperature: Температура генерации.
@@ -318,12 +337,32 @@ class LLMClient:
         :return: Распарсенный JSON ответ.
         :raises LLMClientError: При ошибке запроса или парсинга.
         """
-        response: str = await self.complete(
+        if self._json_mode_supported:
+            try:
+                response: str = await self.complete(
+                    messages,
+                    temperature,
+                    max_tokens,
+                    generation_name=generation_name,
+                    json_mode=True,
+                )
+                return self._extract_json_from_text(response)
+            except LLMClientError as e:
+                if self._is_json_mode_unsupported_error(str(e)):
+                    self._json_mode_supported = False
+                    logger.warning(
+                        f"JSON mode (response_format) not supported by model "
+                        f"{self._model}, falling back to text mode for all subsequent calls"
+                    )
+                else:
+                    raise
+
+        response = await self.complete(
             messages,
             temperature,
             max_tokens,
             generation_name=generation_name,
-            json_mode=True,
+            json_mode=False,
         )
         return self._extract_json_from_text(response)
 
