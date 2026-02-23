@@ -360,10 +360,12 @@ def create_gradio_interface() -> gr.Blocks:
         ).set(
             body_background_fill="#0f1117",
             body_background_fill_dark="#0f1117",
-            block_background_fill="#1a1b26",
-            block_background_fill_dark="#1a1b26",
+            block_background_fill="transparent",
+            block_background_fill_dark="transparent",
             block_border_color="rgba(99, 102, 241, 0.15)",
             block_border_color_dark="rgba(99, 102, 241, 0.15)",
+            block_label_background_fill="transparent",
+            block_label_background_fill_dark="transparent",
             block_label_text_color="#94a3b8",
             block_label_text_color_dark="#94a3b8",
             block_title_text_color="#e2e8f0",
@@ -372,16 +374,34 @@ def create_gradio_interface() -> gr.Blocks:
             input_background_fill_dark="#24253a",
             input_border_color="rgba(99, 102, 241, 0.15)",
             input_border_color_dark="rgba(99, 102, 241, 0.15)",
+            background_fill_primary="#0f1117",
+            background_fill_primary_dark="#0f1117",
+            background_fill_secondary="transparent",
+            background_fill_secondary_dark="transparent",
+            panel_background_fill="transparent",
+            panel_background_fill_dark="transparent",
+            code_background_fill="#24253a",
+            code_background_fill_dark="#24253a",
+            checkbox_background_color="#24253a",
+            checkbox_background_color_dark="#24253a",
             button_primary_background_fill="#6366f1",
             button_primary_background_fill_dark="#6366f1",
             button_primary_background_fill_hover="#4f46e5",
             button_primary_background_fill_hover_dark="#4f46e5",
             button_primary_text_color="white",
             button_primary_text_color_dark="white",
+            button_secondary_background_fill="#2e3048",
+            button_secondary_background_fill_dark="#2e3048",
+            button_secondary_background_fill_hover="#24253a",
+            button_secondary_background_fill_hover_dark="#24253a",
+            button_secondary_text_color="#94a3b8",
+            button_secondary_text_color_dark="#94a3b8",
             body_text_color="#e2e8f0",
             body_text_color_dark="#e2e8f0",
             body_text_color_subdued="#94a3b8",
             body_text_color_subdued_dark="#94a3b8",
+            border_color_primary="rgba(99, 102, 241, 0.15)",
+            border_color_primary_dark="rgba(99, 102, 241, 0.15)",
         ),
         css=MAIN_CSS,
     ) as app:
@@ -408,9 +428,11 @@ def create_gradio_interface() -> gr.Blocks:
                             )
                             refresh_btn = gr.Button(
                                 "🔄",
+                                variant="secondary",
                                 scale=1,
                                 min_width=42,
                                 size="sm",
+                                elem_classes=["btn-refresh"],
                             )
 
                         max_turns_slider = gr.Slider(
@@ -526,22 +548,23 @@ def create_gradio_interface() -> gr.Blocks:
                     )
 
             # ── Right Column: Chat + Feedback ────────────────────────────
-            with gr.Column(scale=7, min_width=480):
+            with gr.Column(scale=9, min_width=600):
                 with gr.Tabs() as tabs:
                     # Tab 1: Interview Chat
                     with gr.TabItem("💬 Интервью", id=0):
                         chatbot = gr.Chatbot(
                             label="Диалог с интервьюером",
-                            height=480,
+                            height=560,
                             type="messages",
                             elem_classes=["chat-area"],
                             show_copy_button=True,
                             avatar_images=(None, None),
                             placeholder=(
-                                "<center>"
+                                "<center style='background: transparent !important;'>"
                                 "<br><br>"
-                                "<h3 style='color: #64748b;'>🎯 Добро пожаловать!</h3>"
-                                "<p style='color: #475569; font-size: 0.9rem;'>"
+                                "<h3 style='color: #64748b; background: transparent !important;'>"
+                                "🎯 Добро пожаловать!</h3>"
+                                "<p style='color: #475569; font-size: 0.9rem; background: transparent !important;'>"
                                 "Настройте параметры слева и нажмите "
                                 "<strong>«Начать интервью»</strong> для начала."
                                 "</p>"
