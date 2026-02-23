@@ -6,13 +6,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
-
 from typing import Any
 
 from ..core.logger_setup import get_system_logger
-from ..llm.client import LLMClient
+from ..llm.client import LLMClient, LLMClientError
 from ..schemas.feedback import (
     AssessedGrade,
     ClarityLevel,
@@ -153,25 +151,35 @@ class EvaluatorAgent(BaseAgent):
         :param state: Состояние интервью.
         :return: Структурированный фидбэк.
         """
-        context = self._build_evaluation_context(state)
-        messages = self._build_messages(context)
+        context: str = self._build_evaluation_context(state)
+        messages: list[dict[str, str]] = self._build_messages(context)
 
         try:
-            response = await self._llm_client.complete_json(
+            response: dict[str, Any] = await self._llm_client.complete_json(
                 messages,
                 temperature=0.3,
                 max_tokens=3000,
                 generation_name="evaluator_feedback",
             )
             return self._parse_feedback(response, state)
+
+        except LLMClientError as e:
+            logger.error(f"Evaluator LLM call failed: {e}")
+            return self._create_fallback_feedback(state)
+
         except Exception as e:
-            logger.error(f"Failed to generate feedback: {e}")
+            logger.error(f"Evaluator feedback parsing failed: {type(e).__name__}: {e}")
             return self._create_fallback_feedback(state)
 
     def _build_evaluation_context(self, state: InterviewState) -> str:
-        """Строит контекст для оценки."""
-        conversation = self._format_conversation(state)
-        skills_summary = self._format_skills_summary(state)
+        """
+        Строит контекст для оценки.
+
+        :param state: Состояние интервью.
+        :return: Контекстная строка для LLM.
+        """
+        conversation: str = self._format_conversation(state)
+        skills_summary: str = self._format_skills_summary(state)
 
         candidate_info_parts: list[str] = [
             f"Имя: {state.participant_name}",
@@ -183,7 +191,9 @@ class EvaluatorAgent(BaseAgent):
                 f"Целевой грейд: {state.candidate.target_grade.value}"
             )
         if state.candidate.experience:
-            candidate_info_parts.append(f"Заявленный опыт: {state.candidate.experience}")
+            candidate_info_parts.append(
+                f"Заявленный опыт: {state.candidate.experience}"
+            )
 
         return f"""ИНФОРМАЦИЯ О КАНДИДАТЕ:
 {chr(10).join(candidate_info_parts)}
@@ -206,7 +216,12 @@ class EvaluatorAgent(BaseAgent):
 5. Конкретные рекомендации по развитию"""
 
     def _format_conversation(self, state: InterviewState) -> str:
-        """Форматирует историю диалога."""
+        """
+        Форматирует историю диалога.
+
+        :param state: Состояние интервью.
+        :return: Форматированная строка диалога.
+        """
         lines: list[str] = []
         for turn in state.turns:
             lines.append(f"[Интервьюер]: {turn.agent_visible_message}")
@@ -219,7 +234,12 @@ class EvaluatorAgent(BaseAgent):
         return "\n".join(lines)
 
     def _format_skills_summary(self, state: InterviewState) -> str:
-        """Форматирует сводку по навыкам."""
+        """
+        Форматирует сводку по навыкам.
+
+        :param state: Состояние интервью.
+        :return: Форматированная сводка.
+        """
         lines: list[str] = []
 
         if state.confirmed_skills:
@@ -230,8 +250,8 @@ class EvaluatorAgent(BaseAgent):
         if state.knowledge_gaps:
             lines.append("Выявленные пробелы:")
             for gap in state.knowledge_gaps:
-                topic = gap.get("topic", "неизвестно")
-                answer = gap.get("correct_answer", "")
+                topic: str = gap.get("topic", "неизвестно")
+                answer: str = gap.get("correct_answer", "")
                 lines.append(f"  ❌ {topic}")
                 if answer:
                     lines.append(f"     Правильный ответ: {answer}")
@@ -246,8 +266,14 @@ class EvaluatorAgent(BaseAgent):
         response: dict[str, Any],
         state: InterviewState,
     ) -> InterviewFeedback:
-        """Парсит ответ LLM в InterviewFeedback."""
-        verdict_data = response.get("verdict", {})
+        """
+        Парсит ответ LLM в InterviewFeedback.
+
+        :param response: Распарсенный JSON-ответ LLM.
+        :param state: Состояние интервью.
+        :return: Структурированный фидбэк.
+        """
+        verdict_data: dict[str, Any] = response.get("verdict", {})
         verdict = Verdict(
             grade=self._parse_grade(verdict_data.get("grade", "Junior")),
             hiring_recommendation=self._parse_hiring_rec(
@@ -256,7 +282,7 @@ class EvaluatorAgent(BaseAgent):
             confidence_score=min(100, max(0, verdict_data.get("confidence_score", 50))),
         )
 
-        tech_data = response.get("technical_review", {})
+        tech_data: dict[str, Any] = response.get("technical_review", {})
         technical_review = TechnicalReview(
             confirmed_skills=[
                 SkillAssessment(**s) for s in tech_data.get("confirmed_skills", [])
@@ -266,7 +292,7 @@ class EvaluatorAgent(BaseAgent):
             ],
         )
 
-        soft_data = response.get("soft_skills_review", {})
+        soft_data: dict[str, Any] = response.get("soft_skills_review", {})
         soft_skills_review = SoftSkillsReview(
             clarity=self._parse_clarity(soft_data.get("clarity", "Average")),
             clarity_details=soft_data.get("clarity_details", ""),
@@ -276,7 +302,7 @@ class EvaluatorAgent(BaseAgent):
             engagement_details=soft_data.get("engagement_details", ""),
         )
 
-        roadmap_data = response.get("roadmap", {})
+        roadmap_data: dict[str, Any] = response.get("roadmap", {})
         roadmap = PersonalRoadmap(
             items=[RoadmapItem(**item) for item in roadmap_data.get("items", [])],
             summary=roadmap_data.get("summary", "План развития не сформирован"),
@@ -291,8 +317,13 @@ class EvaluatorAgent(BaseAgent):
         )
 
     def _parse_grade(self, grade_str: str) -> AssessedGrade:
-        """Парсит строку грейда."""
-        mapping = {
+        """
+        Парсит строку грейда.
+
+        :param grade_str: Строковое представление грейда.
+        :return: Значение перечисления AssessedGrade.
+        """
+        mapping: dict[str, AssessedGrade] = {
             "intern": AssessedGrade.INTERN,
             "junior": AssessedGrade.JUNIOR,
             "middle": AssessedGrade.MIDDLE,
@@ -302,8 +333,13 @@ class EvaluatorAgent(BaseAgent):
         return mapping.get(grade_str.lower(), AssessedGrade.JUNIOR)
 
     def _parse_hiring_rec(self, rec_str: str) -> HiringRecommendation:
-        """Парсит рекомендацию по найму."""
-        lower = rec_str.lower()
+        """
+        Парсит рекомендацию по найму.
+
+        :param rec_str: Строковое представление рекомендации.
+        :return: Значение перечисления HiringRecommendation.
+        """
+        lower: str = rec_str.lower()
         if "strong" in lower:
             return HiringRecommendation.STRONG_HIRE
         if "no" in lower:
@@ -311,8 +347,13 @@ class EvaluatorAgent(BaseAgent):
         return HiringRecommendation.HIRE
 
     def _parse_clarity(self, clarity_str: str) -> ClarityLevel:
-        """Парсит уровень ясности."""
-        mapping = {
+        """
+        Парсит уровень ясности.
+
+        :param clarity_str: Строковое представление уровня ясности.
+        :return: Значение перечисления ClarityLevel.
+        """
+        mapping: dict[str, ClarityLevel] = {
             "excellent": ClarityLevel.EXCELLENT,
             "good": ClarityLevel.GOOD,
             "average": ClarityLevel.AVERAGE,
@@ -321,7 +362,12 @@ class EvaluatorAgent(BaseAgent):
         return mapping.get(clarity_str.lower(), ClarityLevel.AVERAGE)
 
     def _create_fallback_feedback(self, state: InterviewState) -> InterviewFeedback:
-        """Создаёт резервный фидбэк."""
+        """
+        Создаёт резервный фидбэк.
+
+        :param state: Состояние интервью.
+        :return: Резервный фидбэк с минимальными данными.
+        """
         return InterviewFeedback(
             verdict=Verdict(
                 grade=AssessedGrade.JUNIOR,

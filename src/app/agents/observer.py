@@ -6,13 +6,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
-
 from typing import Any
 
 from ..core.logger_setup import get_system_logger
-from ..llm.client import LLMClient
+from ..llm.client import LLMClient, LLMClientError
 from ..schemas.interview import (
     AnswerQuality,
     InternalThought,
@@ -153,9 +151,8 @@ OBSERVER_SYSTEM_PROMPT = """# OBSERVER AGENT — Агент-Наблюдател
 
 ## ФОРМАТ ОТВЕТА
 
-Отвечай ТОЛЬКО валидным JSON:
+Отвечай ТОЛЬКО валидным JSON (без markdown-обёртки, без пояснений до/после):
 
-```json
 {
   "response_type": "<тип>",
   "quality": "<качество>",
@@ -175,7 +172,6 @@ OBSERVER_SYSTEM_PROMPT = """# OBSERVER AGENT — Агент-Наблюдател
   "demonstrated_level": null,
   "thoughts": "анализ"
 }
-```
 """
 
 
@@ -209,20 +205,24 @@ class ObserverAgent(BaseAgent):
         :param last_question: Последний вопрос интервьюера.
         :return: Анализ ответа.
         """
-        context = self._build_analysis_context(state, user_message, last_question)
-        messages = self._build_messages(context)
+        context: str = self._build_analysis_context(state, user_message, last_question)
+        messages: list[dict[str, str]] = self._build_messages(context)
 
         try:
-            response_text = await self._llm_client.complete(
+            response: dict[str, Any] = await self._llm_client.complete_json(
                 messages,
                 temperature=0.3,
                 max_tokens=1000,
                 generation_name="observer_analysis",
             )
-            response = self._extract_json(response_text)
             return self._parse_analysis(response, user_message)
+
+        except LLMClientError as e:
+            logger.error(f"Observer LLM call failed: {e}")
+            return self._create_fallback_analysis(user_message)
+
         except Exception as e:
-            logger.error(f"Observer analysis failed: {e}")
+            logger.error(f"Observer analysis parsing failed: {type(e).__name__}: {e}")
             return self._create_fallback_analysis(user_message)
 
     def _build_analysis_context(
@@ -231,18 +231,25 @@ class ObserverAgent(BaseAgent):
         user_message: str,
         last_question: str,
     ) -> str:
-        """Строит контекст для анализа."""
-        history_summary = self._summarize_history(state)
+        """
+        Строит контекст для анализа.
 
-        candidate_name = state.candidate.name or "Неизвестно"
-        candidate_position = state.candidate.position or "Не указана"
-        candidate_grade = (
+        :param state: Состояние интервью.
+        :param user_message: Сообщение кандидата.
+        :param last_question: Последний вопрос интервьюера.
+        :return: Контекстная строка для LLM.
+        """
+        history_summary: str = self._summarize_history(state)
+
+        candidate_name: str = state.candidate.name or "Неизвестно"
+        candidate_position: str = state.candidate.position or "Не указана"
+        candidate_grade: str = (
             state.candidate.target_grade.value
             if state.candidate.target_grade
             else "Не указан"
         )
-        candidate_experience = state.candidate.experience or "Не указан"
-        candidate_technologies = (
+        candidate_experience: str = state.candidate.experience or "Не указан"
+        candidate_technologies: str = (
             ", ".join(state.candidate.technologies)
             if state.candidate.technologies
             else "Не указаны"
@@ -284,44 +291,37 @@ class ObserverAgent(BaseAgent):
 ANSWERED_LAST_QUESTION=YES|NO; NEXT_STEP=..."""
 
     def _summarize_history(self, state: InterviewState) -> str:
-        """Создаёт краткое резюме истории."""
+        """
+        Создаёт краткое резюме истории.
+
+        :param state: Состояние интервью.
+        :return: Резюме последних ходов.
+        """
         if not state.turns:
             return "Интервью только началось."
 
         summary_parts: list[str] = []
         for turn in state.turns[-5:]:
-            summary_parts.append(f"**Интервьюер:** {turn.agent_visible_message[:100]}...")
+            summary_parts.append(
+                f"**Интервьюер:** {turn.agent_visible_message[:100]}..."
+            )
             if turn.user_message:
                 summary_parts.append(f"**Кандидат:** {turn.user_message[:100]}...")
 
         return "\n".join(summary_parts)
-
-    def _extract_json(self, text: str) -> dict[str, Any]:
-        """Извлекает JSON из текста."""
-        text = text.strip()
-
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-
-        text = text.strip()
-
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start != -1 and end > start:
-            text = text[start:end]
-
-        return json.loads(text)
 
     def _parse_analysis(
         self,
         response: dict[str, Any],
         user_message: str,
     ) -> ObserverAnalysis:
-        """Парсит ответ LLM в ObserverAnalysis."""
+        """
+        Парсит ответ LLM в ObserverAnalysis.
+
+        :param response: Распарсенный JSON-ответ LLM.
+        :param user_message: Исходное сообщение кандидата.
+        :return: Структурированный анализ.
+        """
         from ..schemas.interview import ExtractedCandidateInfo
 
         try:
@@ -334,15 +334,15 @@ ANSWERED_LAST_QUESTION=YES|NO; NEXT_STEP=..."""
         except ValueError:
             quality = AnswerQuality.ACCEPTABLE
 
-        thoughts_content = response.get("thoughts", "Анализ выполнен.")
+        thoughts_content: str = response.get("thoughts", "Анализ выполнен.")
         thought = InternalThought(
             from_agent="Observer",
             to_agent="Interviewer",
             content=thoughts_content,
         )
 
-        extracted_data = response.get("extracted_info", {})
-        extracted_info = None
+        extracted_data: dict[str, Any] = response.get("extracted_info", {})
+        extracted_info: ExtractedCandidateInfo | None = None
         if extracted_data and any(
             v for k, v in extracted_data.items() if k != "technologies" and v
         ):
@@ -366,15 +366,22 @@ ANSWERED_LAST_QUESTION=YES|NO; NEXT_STEP=..."""
             recommendation=response.get("recommendation", "Продолжай интервью"),
             thoughts=[thought],
             should_simplify=response.get("should_simplify", False),
-            should_increase_difficulty=response.get("should_increase_difficulty", False),
+            should_increase_difficulty=response.get(
+                "should_increase_difficulty", False
+            ),
             correct_answer=response.get("correct_answer"),
             extracted_info=extracted_info,
             demonstrated_level=response.get("demonstrated_level"),
         )
 
     def _create_fallback_analysis(self, user_message: str) -> ObserverAnalysis:
-        """Создаёт резервный анализ при ошибке."""
-        lower_msg = user_message.lower()
+        """
+        Создаёт резервный анализ при ошибке.
+
+        :param user_message: Сообщение кандидата.
+        :return: Резервный анализ.
+        """
+        lower_msg: str = user_message.lower()
 
         if any(
             cmd in lower_msg

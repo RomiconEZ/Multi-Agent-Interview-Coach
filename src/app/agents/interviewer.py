@@ -7,11 +7,10 @@
 from __future__ import annotations
 
 import logging
-
 from typing import Any
 
 from ..core.logger_setup import get_system_logger
-from ..llm.client import LLMClient
+from ..llm.client import LLMClient, LLMClientError
 from ..schemas.interview import (
     DifficultyLevel,
     InternalThought,
@@ -185,18 +184,25 @@ class InterviewerAgent(BaseAgent):
 
 НЕ спрашивай про конкретную технологию пока не знаешь, на какую позицию претендует кандидат."""
 
-        messages = self._build_messages(context)
+        messages: list[dict[str, str]] = self._build_messages(context)
 
         try:
-            response = await self._llm_client.complete(
+            response: str = await self._llm_client.complete(
                 messages,
                 temperature=0.7,
                 max_tokens=300,
                 generation_name="interviewer_greeting",
             )
             return response.strip()
+
+        except LLMClientError as e:
+            logger.error(f"Interviewer greeting LLM call failed: {e}")
+            return "Привет! Расскажи про свой опыт в программировании."
+
         except Exception as e:
-            logger.error(f"Failed to generate greeting: {e}")
+            logger.error(
+                f"Interviewer greeting unexpected error: {type(e).__name__}: {e}"
+            )
             return "Привет! Расскажи про свой опыт в программировании."
 
     async def process(
@@ -216,8 +222,10 @@ class InterviewerAgent(BaseAgent):
         """
         thoughts: list[InternalThought] = list(analysis.thoughts)
 
-        context = self._build_response_context(state, analysis, user_message)
-        messages = self._build_messages(context, state.get_conversation_history())
+        context: str = self._build_response_context(state, analysis, user_message)
+        messages: list[dict[str, str]] = self._build_messages(
+            context, state.get_conversation_history()
+        )
 
         interviewer_thought = InternalThought(
             from_agent="Interviewer",
@@ -227,15 +235,22 @@ class InterviewerAgent(BaseAgent):
         thoughts.append(interviewer_thought)
 
         try:
-            response = await self._llm_client.complete(
+            response: str = await self._llm_client.complete(
                 messages,
                 temperature=0.7,
                 max_tokens=800,
                 generation_name="interviewer_response",
             )
             return response.strip(), thoughts
+
+        except LLMClientError as e:
+            logger.error(f"Interviewer response LLM call failed: {e}")
+            return self._generate_fallback_response(analysis), thoughts
+
         except Exception as e:
-            logger.error(f"Failed to generate response: {e}")
+            logger.error(
+                f"Interviewer response unexpected error: {type(e).__name__}: {e}"
+            )
             return self._generate_fallback_response(analysis), thoughts
 
     def _build_response_context(
@@ -244,7 +259,14 @@ class InterviewerAgent(BaseAgent):
         analysis: ObserverAnalysis,
         user_message: str,
     ) -> str:
-        """Строит контекст для генерации ответа."""
+        """
+        Строит контекст для генерации ответа.
+
+        :param state: Состояние интервью.
+        :param analysis: Анализ от Observer.
+        :param user_message: Сообщение кандидата.
+        :return: Контекстная строка для LLM.
+        """
         context_parts: list[str] = [
             "## ИНФОРМАЦИЯ О КАНДИДАТЕ",
         ]
@@ -270,7 +292,9 @@ class InterviewerAgent(BaseAgent):
         if not any([state.candidate.name, state.candidate.position]):
             context_parts.append("- (Данные ещё не известны - кандидат представляется)")
 
-        last_agent_message = state.turns[-1].agent_visible_message if state.turns else ""
+        last_agent_message: str = (
+            state.turns[-1].agent_visible_message if state.turns else ""
+        )
 
         context_parts.extend(
             [
@@ -315,13 +339,19 @@ class InterviewerAgent(BaseAgent):
         analysis: ObserverAnalysis,
         state: InterviewState,
     ) -> str:
-        """Возвращает инструкцию в зависимости от типа ответа."""
-        response_type = analysis.response_type
+        """
+        Возвращает инструкцию в зависимости от типа ответа.
+
+        :param analysis: Анализ от Observer.
+        :param state: Состояние интервью.
+        :return: Текстовая инструкция для LLM.
+        """
+        response_type: ResponseType = analysis.response_type
 
         if response_type == ResponseType.INTRODUCTION:
-            techs = state.candidate.technologies
+            techs: list[str] = state.candidate.technologies
             if techs:
-                tech_list = ", ".join(techs[:3])  # Первые 3 технологии
+                tech_list: str = ", ".join(techs[:3])
                 return (
                     f"Кандидат представился. Поблагодари за представление. "
                     f"Задай первый технический вопрос по одной из технологий: {tech_list}. "
@@ -333,7 +363,7 @@ class InterviewerAgent(BaseAgent):
             )
 
         if response_type == ResponseType.HALLUCINATION:
-            correct = (
+            correct: str = (
                 analysis.correct_answer
                 or "информацию можно найти в официальной документации"
             )
@@ -385,7 +415,7 @@ class InterviewerAgent(BaseAgent):
                 f"уровня {state.current_difficulty.name}."
             )
 
-        difficulty_hint = self._get_difficulty_hint(state.current_difficulty)
+        difficulty_hint: str = self._get_difficulty_hint(state.current_difficulty)
         techs = state.candidate.technologies
         if techs:
             tech_list = ", ".join(techs[:3])
@@ -400,8 +430,13 @@ class InterviewerAgent(BaseAgent):
         )
 
     def _get_difficulty_hint(self, difficulty: DifficultyLevel) -> str:
-        """Возвращает подсказку по сложности."""
-        hints = {
+        """
+        Возвращает подсказку по сложности.
+
+        :param difficulty: Текущий уровень сложности.
+        :return: Текстовая подсказка.
+        """
+        hints: dict[DifficultyLevel, str] = {
             DifficultyLevel.BASIC: "Фокус на определениях и базовых концепциях.",
             DifficultyLevel.INTERMEDIATE: "Фокус на практическом применении.",
             DifficultyLevel.ADVANCED: "Фокус на edge cases и оптимизации.",
@@ -410,8 +445,13 @@ class InterviewerAgent(BaseAgent):
         return hints.get(difficulty, "")
 
     def _generate_thought(self, analysis: ObserverAnalysis) -> str:
-        """Генерирует внутреннюю мысль интервьюера."""
-        base_thoughts = {
+        """
+        Генерирует внутреннюю мысль интервьюера.
+
+        :param analysis: Анализ от Observer.
+        :return: Текст мысли.
+        """
+        base_thoughts: dict[ResponseType, str] = {
             ResponseType.INTRODUCTION: "Кандидат представился. Анализирую опыт и технологии для релевантных вопросов.",
             ResponseType.HALLUCINATION: f"ALERT: Кандидат галлюцинирует! Корректирую ошибку и возвращаюсь к активному техническому вопросу. Рекомендация: {analysis.recommendation}",
             ResponseType.OFF_TOPIC: "Кандидат пытается сменить тему. Возвращаю к активному техническому вопросу и не меняю тему.",
@@ -425,7 +465,12 @@ class InterviewerAgent(BaseAgent):
         )
 
     def _generate_fallback_response(self, analysis: ObserverAnalysis) -> str:
-        """Генерирует резервный ответ."""
+        """
+        Генерирует резервный ответ.
+
+        :param analysis: Анализ от Observer.
+        :return: Резервный текст ответа.
+        """
         if analysis.response_type == ResponseType.HALLUCINATION:
             return (
                 "Хм, это довольно необычное утверждение. Я не встречал такой информации "
