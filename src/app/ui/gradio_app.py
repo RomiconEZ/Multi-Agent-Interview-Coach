@@ -14,6 +14,7 @@ from typing import Any
 
 import gradio as gr
 
+from .styles import HEADER_HTML, MAIN_CSS
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger, setup_logging
 from ..interview import InterviewSession, create_interview_session
@@ -23,7 +24,6 @@ from ..schemas.agent_settings import (
     InterviewConfig,
     SingleAgentConfig,
 )
-from .styles import HEADER_HTML, MAIN_CSS
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -31,10 +31,24 @@ _current_session: InterviewSession | None = None
 _last_log_path: Path | None = None
 _last_detailed_log_path: Path | None = None
 
+# Тип кортежа, возвращаемого обработчиками, обновляющими все выходы.
+_FullHandlerResult = tuple[str, str, list[dict[str, str | None]], str, str | None, str | None]
+
+# Тип кортежа обработчика шага 1 (только msg_input + chatbot).
+_UserStepResult = tuple[str, list[dict[str, str | None]]]
+
+# Тип кортежа обработчика шага 2 (всё, кроме msg_input).
+_BotStepResult = tuple[str, list[dict[str, str | None]], str, str | None, str | None]
+
 
 def _run_async(coro: Any) -> Any:
     """
     Выполняет корутину в синхронном контексте Gradio.
+
+    Используется только для обработчиков, которым требуется синхронный вызов
+    (например, ``start_interview``, ``stop_interview``, ``reset_interview``).
+    Обработчики в горячем пути отправки сообщений объявлены как ``async def``
+    напрямую, чтобы не блокировать event loop Gradio.
 
     :param coro: Корутина для выполнения.
     :return: Результат выполнения корутины.
@@ -54,15 +68,15 @@ def _run_async(coro: Any) -> Any:
 
 
 def _build_interview_config(
-    model: str,
-    max_turns: int,
-    job_description: str,
-    obs_temp: float,
-    obs_tokens: int,
-    int_temp: float,
-    int_tokens: int,
-    eval_temp: float,
-    eval_tokens: int,
+        model: str,
+        max_turns: int,
+        job_description: str,
+        obs_temp: float,
+        obs_tokens: int,
+        int_temp: float,
+        int_tokens: int,
+        eval_temp: float,
+        eval_tokens: int,
 ) -> InterviewConfig:
     """
     Собирает конфигурацию интервью из параметров UI.
@@ -93,16 +107,16 @@ def _build_interview_config(
 
 
 async def _start_interview_async(
-    model: str,
-    max_turns: int,
-    job_description: str,
-    obs_temp: float,
-    obs_tokens: int,
-    int_temp: float,
-    int_tokens: int,
-    eval_temp: float,
-    eval_tokens: int,
-) -> tuple[str, str, list[dict[str, str | None]], str, str | None, str | None]:
+        model: str,
+        max_turns: int,
+        job_description: str,
+        obs_temp: float,
+        obs_tokens: int,
+        int_temp: float,
+        int_tokens: int,
+        eval_temp: float,
+        eval_tokens: int,
+) -> _FullHandlerResult:
     """
     Асинхронно начинает новое интервью.
 
@@ -140,16 +154,16 @@ async def _start_interview_async(
 
 
 def start_interview(
-    model: str,
-    max_turns: int,
-    job_description: str,
-    obs_temp: float,
-    obs_tokens: int,
-    int_temp: float,
-    int_tokens: int,
-    eval_temp: float,
-    eval_tokens: int,
-) -> tuple[str, str, list[dict[str, str | None]], str, str | None, str | None]:
+        model: str,
+        max_turns: int,
+        job_description: str,
+        obs_temp: float,
+        obs_tokens: int,
+        int_temp: float,
+        int_tokens: int,
+        eval_temp: float,
+        eval_tokens: int,
+) -> _FullHandlerResult:
     """Синхронная обёртка для старта интервью."""
     return _run_async(
         _start_interview_async(
@@ -166,40 +180,67 @@ def start_interview(
     )
 
 
-async def _send_message_async(
-    message: str,
-    history: list[dict[str, str | None]],
-) -> tuple[str, str, list[dict[str, str | None]], str, str | None, str | None]:
+def add_user_message(
+        message: str,
+        history: list[dict[str, str | None]],
+) -> _UserStepResult:
     """
-    Асинхронно обрабатывает сообщение кандидата.
+    Мгновенно добавляет сообщение пользователя в историю чата и очищает поле ввода.
 
-    :param message: Текст сообщения.
+    Выполняется с ``queue=False`` — обходит очередь Gradio и обновляет UI
+    немедленно, не дожидаясь ответа от LLM. Является чисто синхронной функцией:
+    не вызывает LLM и не блокирует event loop.
+
+    :param message: Текст сообщения кандидата.
     :param history: Текущая история чата.
-    :return: Tuple (статус, очищенный инпут, история, фидбэк, лог, детальный лог).
+    :return: Tuple (очищенный инпут, обновлённая история с сообщением пользователя).
+    """
+    if not message.strip():
+        return message, history
+
+    updated_history: list[dict[str, str | None]] = list(history)
+    updated_history.append({"role": "user", "content": message})
+    return "", updated_history
+
+
+async def bot_respond(
+        history: list[dict[str, str | None]],
+) -> _BotStepResult:
+    """
+    Асинхронно обрабатывает последнее сообщение пользователя и возвращает ответ агента.
+
+    Объявлена как ``async def`` — Gradio вызывает её через ``await``,
+    что позволяет event loop оставаться не заблокированным и доставить
+    обновление от шага 1 (сообщение пользователя) в браузер до начала LLM-вызова.
+
+    Вызывается через ``.then()`` после :func:`add_user_message`.
+
+    :param history: История чата с уже добавленным сообщением пользователя.
+    :return: Tuple (статус, обновлённая история с ответом агента, фидбэк, лог, детальный лог).
     """
     global _current_session, _last_log_path, _last_detailed_log_path
 
     if _current_session is None:
-        return "⚠️ Сначала начните интервью", message, history, "", None, None
+        return "⚠️ Сначала начните интервью", history, "", None, None
 
-    if not message.strip():
-        return "⚠️ Введите сообщение", "", history, "", None, None
+    user_message: str = ""
+    for msg in reversed(history):
+        if msg.get("role") == "user":
+            user_message = str(msg.get("content") or "")
+            break
 
-    history = list(history)
-    history.append({"role": "user", "content": message})
+    if not user_message.strip():
+        return "⚠️ Сообщение пустое", history, "", None, None
 
     response: str
     is_finished: bool
-    response, is_finished = await _current_session.process_message(message.strip())
+    response, is_finished = await _current_session.process_message(user_message.strip())
 
-    history.append({"role": "assistant", "content": response})
+    updated_history: list[dict[str, str | None]] = list(history)
+    updated_history.append({"role": "assistant", "content": response})
 
     if is_finished:
-        (
-            feedback,
-            summary_path,
-            detailed_path,
-        ) = await _current_session.generate_feedback()
+        feedback, summary_path, detailed_path = await _current_session.generate_feedback()
         feedback_text: str = feedback.to_formatted_string()
 
         metrics = _current_session.get_session_metrics()
@@ -211,8 +252,7 @@ async def _send_message_async(
 
         return (
             "✅ Интервью завершено. Фидбэк сгенерирован.",
-            "",
-            history,
+            updated_history,
             feedback_text,
             str(summary_path),
             str(detailed_path),
@@ -221,22 +261,14 @@ async def _send_message_async(
     current_turn: str = str(
         _current_session.state.current_turn if _current_session.state else "?"
     )
-    max_turns: str = str(_current_session._config.max_turns)
-    status = f"💬 Ход {current_turn}/{max_turns}"
+    max_turns_val: str = str(_current_session._config.max_turns)
+    status = f"💬 Ход {current_turn}/{max_turns_val}"
 
-    return status, "", history, "", None, None
-
-
-def send_message(
-    message: str,
-    history: list[dict[str, str | None]],
-) -> tuple[str, str, list[dict[str, str | None]], str, str | None, str | None]:
-    """Синхронная обёртка для отправки сообщения."""
-    return _run_async(_send_message_async(message, history))
+    return status, updated_history, "", None, None
 
 
-async def _stop_interview_async(
-    history: list[dict[str, str | None]],
+async def stop_interview(
+        history: list[dict[str, str | None]],
 ) -> tuple[str, list[dict[str, str | None]], str, str | None, str | None]:
     """
     Асинхронно завершает интервью и генерирует фидбэк.
@@ -262,31 +294,22 @@ async def _stop_interview_async(
     _last_log_path = summary_path
     _last_detailed_log_path = detailed_path
 
-    history = list(history)
-    history.append({"role": "user", "content": "Стоп интервью"})
-    history.append(
+    updated_history: list[dict[str, str | None]] = list(history)
+    updated_history.append({"role": "user", "content": "Стоп интервью"})
+    updated_history.append(
         {"role": "assistant", "content": "Интервью завершено. Формирую фидбэк..."}
     )
 
     return (
         "✅ Интервью завершено",
-        history,
+        updated_history,
         feedback_text,
         str(summary_path),
         str(detailed_path),
     )
 
 
-def stop_interview(
-    history: list[dict[str, str | None]],
-) -> tuple[str, list[dict[str, str | None]], str, str | None, str | None]:
-    """Синхронная обёртка для завершения интервью."""
-    return _run_async(_stop_interview_async(history))
-
-
-async def _reset_interview_async() -> tuple[
-    str, str, list[dict[str, str | None]], str, str | None, str | None
-]:
+async def reset_interview() -> _FullHandlerResult:
     """
     Асинхронно сбрасывает текущее интервью.
 
@@ -312,13 +335,6 @@ async def _reset_interview_async() -> tuple[
         None,
         None,
     )
-
-
-def reset_interview() -> tuple[
-    str, str, list[dict[str, str | None]], str, str | None, str | None
-]:
-    """Синхронная обёртка для сброса интервью."""
-    return _run_async(_reset_interview_async())
 
 
 def refresh_models() -> gr.update:
@@ -350,60 +366,60 @@ def create_gradio_interface() -> gr.Blocks:
     )
 
     with gr.Blocks(
-        title="Multi-Agent Interview Coach",
-        theme=gr.themes.Base(
-            primary_hue=gr.themes.colors.indigo,
-            secondary_hue=gr.themes.colors.purple,
-            neutral_hue=gr.themes.colors.slate,
-            font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
-            font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "Consolas", "monospace"],
-        ).set(
-            body_background_fill="#0f1117",
-            body_background_fill_dark="#0f1117",
-            block_background_fill="transparent",
-            block_background_fill_dark="transparent",
-            block_border_color="rgba(99, 102, 241, 0.15)",
-            block_border_color_dark="rgba(99, 102, 241, 0.15)",
-            block_label_background_fill="transparent",
-            block_label_background_fill_dark="transparent",
-            block_label_text_color="#94a3b8",
-            block_label_text_color_dark="#94a3b8",
-            block_title_text_color="#e2e8f0",
-            block_title_text_color_dark="#e2e8f0",
-            input_background_fill="#24253a",
-            input_background_fill_dark="#24253a",
-            input_border_color="rgba(99, 102, 241, 0.15)",
-            input_border_color_dark="rgba(99, 102, 241, 0.15)",
-            background_fill_primary="#0f1117",
-            background_fill_primary_dark="#0f1117",
-            background_fill_secondary="transparent",
-            background_fill_secondary_dark="transparent",
-            panel_background_fill="transparent",
-            panel_background_fill_dark="transparent",
-            code_background_fill="#24253a",
-            code_background_fill_dark="#24253a",
-            checkbox_background_color="#24253a",
-            checkbox_background_color_dark="#24253a",
-            button_primary_background_fill="#6366f1",
-            button_primary_background_fill_dark="#6366f1",
-            button_primary_background_fill_hover="#4f46e5",
-            button_primary_background_fill_hover_dark="#4f46e5",
-            button_primary_text_color="white",
-            button_primary_text_color_dark="white",
-            button_secondary_background_fill="#2e3048",
-            button_secondary_background_fill_dark="#2e3048",
-            button_secondary_background_fill_hover="#24253a",
-            button_secondary_background_fill_hover_dark="#24253a",
-            button_secondary_text_color="#94a3b8",
-            button_secondary_text_color_dark="#94a3b8",
-            body_text_color="#e2e8f0",
-            body_text_color_dark="#e2e8f0",
-            body_text_color_subdued="#94a3b8",
-            body_text_color_subdued_dark="#94a3b8",
-            border_color_primary="rgba(99, 102, 241, 0.15)",
-            border_color_primary_dark="rgba(99, 102, 241, 0.15)",
-        ),
-        css=MAIN_CSS,
+            title="Multi-Agent Interview Coach",
+            theme=gr.themes.Base(
+                primary_hue=gr.themes.colors.indigo,
+                secondary_hue=gr.themes.colors.purple,
+                neutral_hue=gr.themes.colors.slate,
+                font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
+                font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "Consolas", "monospace"],
+            ).set(
+                body_background_fill="#0f1117",
+                body_background_fill_dark="#0f1117",
+                block_background_fill="transparent",
+                block_background_fill_dark="transparent",
+                block_border_color="rgba(99, 102, 241, 0.15)",
+                block_border_color_dark="rgba(99, 102, 241, 0.15)",
+                block_label_background_fill="transparent",
+                block_label_background_fill_dark="transparent",
+                block_label_text_color="#94a3b8",
+                block_label_text_color_dark="#94a3b8",
+                block_title_text_color="#e2e8f0",
+                block_title_text_color_dark="#e2e8f0",
+                input_background_fill="#24253a",
+                input_background_fill_dark="#24253a",
+                input_border_color="rgba(99, 102, 241, 0.15)",
+                input_border_color_dark="rgba(99, 102, 241, 0.15)",
+                background_fill_primary="#0f1117",
+                background_fill_primary_dark="#0f1117",
+                background_fill_secondary="transparent",
+                background_fill_secondary_dark="transparent",
+                panel_background_fill="transparent",
+                panel_background_fill_dark="transparent",
+                code_background_fill="#24253a",
+                code_background_fill_dark="#24253a",
+                checkbox_background_color="#24253a",
+                checkbox_background_color_dark="#24253a",
+                button_primary_background_fill="#6366f1",
+                button_primary_background_fill_dark="#6366f1",
+                button_primary_background_fill_hover="#4f46e5",
+                button_primary_background_fill_hover_dark="#4f46e5",
+                button_primary_text_color="white",
+                button_primary_text_color_dark="white",
+                button_secondary_background_fill="#2e3048",
+                button_secondary_background_fill_dark="#2e3048",
+                button_secondary_background_fill_hover="#24253a",
+                button_secondary_background_fill_hover_dark="#24253a",
+                button_secondary_text_color="#94a3b8",
+                button_secondary_text_color_dark="#94a3b8",
+                body_text_color="#e2e8f0",
+                body_text_color_dark="#e2e8f0",
+                body_text_color_subdued="#94a3b8",
+                body_text_color_subdued_dark="#94a3b8",
+                border_color_primary="rgba(99, 102, 241, 0.15)",
+                border_color_primary_dark="rgba(99, 102, 241, 0.15)",
+            ),
+            css=MAIN_CSS,
     ) as app:
         # ── Header ──────────────────────────────────────────────────────
         gr.HTML(HEADER_HTML)
@@ -634,6 +650,15 @@ def create_gradio_interface() -> gr.Blocks:
             detailed_log_file,
         ]
 
+        # Выходы второго шага (всё кроме msg_input).
+        bot_outputs: list[gr.components.Component] = [
+            status_output,
+            chatbot,
+            feedback_output,
+            main_log_file,
+            detailed_log_file,
+        ]
+
         # ── Event Handlers ───────────────────────────────────────────────
 
         refresh_btn.click(
@@ -648,16 +673,34 @@ def create_gradio_interface() -> gr.Blocks:
             outputs=all_outputs,
         )
 
+        # Паттерн двухшаговой отправки сообщения:
+        # Шаг 1 (queue=False, sync): мгновенно добавляет сообщение пользователя
+        #   в чат и очищает поле ввода — браузер получает обновление немедленно.
+        # Шаг 2 (.then, async def, show_progress="hidden"): Gradio вызывает через
+        #   await; show_progress="hidden" убирает оверлей загрузки на chatbot,
+        #   который по умолчанию скрывает весь компонент во время ожидания LLM.
         send_btn.click(
-            fn=send_message,
+            fn=add_user_message,
             inputs=[msg_input, chatbot],
-            outputs=all_outputs,
+            outputs=[msg_input, chatbot],
+            queue=False,
+        ).then(
+            fn=bot_respond,
+            inputs=[chatbot],
+            outputs=bot_outputs,
+            show_progress="hidden",
         )
 
         msg_input.submit(
-            fn=send_message,
+            fn=add_user_message,
             inputs=[msg_input, chatbot],
-            outputs=all_outputs,
+            outputs=[msg_input, chatbot],
+            queue=False,
+        ).then(
+            fn=bot_respond,
+            inputs=[chatbot],
+            outputs=bot_outputs,
+            show_progress="hidden",
         )
 
         stop_btn.click(
@@ -682,9 +725,9 @@ def create_gradio_interface() -> gr.Blocks:
 
 
 def launch_app(
-    server_name: str,
-    server_port: int,
-    share: bool,
+        server_name: str,
+        server_port: int,
+        share: bool,
 ) -> None:
     """
     Запускает Gradio приложение.
