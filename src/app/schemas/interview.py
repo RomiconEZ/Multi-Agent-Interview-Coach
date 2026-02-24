@@ -102,6 +102,23 @@ class ExtractedCandidateInfo(BaseModel):
     technologies: list[str] = Field(default_factory=list)
 
 
+UNANSWERED_RESPONSE_TYPES: frozenset[ResponseType] = frozenset(
+    {
+        ResponseType.OFF_TOPIC,
+        ResponseType.QUESTION,
+        ResponseType.STOP_COMMAND,
+    }
+)
+"""
+Типы ответов, при которых кандидат по определению
+не отвечает на последний технический вопрос.
+Используется как fallback при отсутствии явного значения ``answered_last_question`` от Observer LLM.
+
+HALLUCINATION не включён: кандидат мог попытаться ответить
+(галлюцинация _по теме_ вопроса), решение остаётся за Observer LLM.
+"""
+
+
 class ObserverAnalysis(BaseModel):
     """
     Результат анализа ответа наблюдателем.
@@ -117,6 +134,7 @@ class ObserverAnalysis(BaseModel):
     :ivar correct_answer: Правильный ответ (если пользователь ошибся).
     :ivar extracted_info: Извлечённая информация о кандидате.
     :ivar demonstrated_level: Продемонстрированный уровень кандидата.
+    :ivar answered_last_question: Ответил ли кандидат на последний технический вопрос.
     """
 
     response_type: ResponseType
@@ -130,6 +148,7 @@ class ObserverAnalysis(BaseModel):
     correct_answer: str | None = None
     extracted_info: ExtractedCandidateInfo | None = None
     demonstrated_level: str | None = None
+    answered_last_question: bool = True
 
 
 class InterviewTurn(BaseModel):
@@ -210,7 +229,7 @@ class InterviewState(BaseModel):
     current_difficulty: DifficultyLevel = DifficultyLevel.BASIC
     covered_topics: list[str] = Field(default_factory=list)
     confirmed_skills: list[str] = Field(default_factory=list)
-    knowledge_gaps: list[dict[str, str]] = Field(default_factory=list)
+    knowledge_gaps: list[dict[str, str | None]] = Field(default_factory=list)
     is_active: bool = True
     consecutive_good_answers: int = 0
     consecutive_bad_answers: int = 0
@@ -219,10 +238,26 @@ class InterviewState(BaseModel):
         self.turns.append(turn)
         self.current_turn += 1
 
-    def get_conversation_history(self) -> list[dict[str, str]]:
-        """Возвращает историю разговора для LLM."""
+    def get_conversation_history(
+        self,
+        max_turns: int | None = None,
+    ) -> list[dict[str, str]]:
+        """
+        Возвращает историю разговора для LLM.
+
+        При указании ``max_turns`` возвращает только последние N ходов,
+        что ограничивает рост контекста и предотвращает превышение
+        окна контекста модели.
+
+        :param max_turns: Максимальное количество ходов в истории.
+            ``None`` — вернуть всю историю без ограничений.
+        :return: Список сообщений с чередованием ролей assistant/user.
+        """
+        turns_to_use: list[InterviewTurn] = (
+            self.turns if max_turns is None else self.turns[-max_turns:]
+        )
         history: list[dict[str, str]] = []
-        for turn in self.turns:
+        for turn in turns_to_use:
             history.append({"role": "assistant", "content": turn.agent_visible_message})
             if turn.user_message:
                 history.append({"role": "user", "content": turn.user_message})

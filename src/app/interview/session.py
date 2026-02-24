@@ -162,7 +162,9 @@ class InterviewSession:
         )
 
         logger.debug(
-            f"Observer analysis: type={analysis.response_type}, quality={analysis.quality}"
+            f"Observer analysis: type={analysis.response_type}, "
+            f"quality={analysis.quality}, "
+            f"answered_last_question={analysis.answered_last_question}"
         )
 
         self._langfuse.add_span(
@@ -172,6 +174,7 @@ class InterviewSession:
                 "response_type": analysis.response_type.value,
                 "quality": analysis.quality.value,
                 "is_factually_correct": analysis.is_factually_correct,
+                "answered_last_question": analysis.answered_last_question,
                 "recommendation": analysis.recommendation,
             },
         )
@@ -187,7 +190,14 @@ class InterviewSession:
 
         self._update_state_from_analysis(analysis, user_message)
 
-        self._apply_difficulty_adjustment(analysis)
+        if analysis.answered_last_question:
+            self._apply_difficulty_adjustment(analysis)
+        else:
+            logger.debug(
+                f"ADAPTIVITY: Skipping difficulty adjustment — "
+                f"candidate did not answer the last question "
+                f"(response_type={analysis.response_type.value})"
+            )
 
         if analysis.demonstrated_level and self._state.candidate.target_grade:
             logger.info(
@@ -420,14 +430,15 @@ class InterviewSession:
             if topic not in self._state.covered_topics:
                 self._state.covered_topics.append(topic)
 
-        if analysis.quality in (AnswerQuality.EXCELLENT, AnswerQuality.GOOD):
-            if analysis.is_factually_correct:
-                for topic in analysis.detected_topics:
-                    if topic not in self._state.confirmed_skills:
-                        self._state.confirmed_skills.append(topic)
+        if analysis.answered_last_question:
+            if analysis.quality in (AnswerQuality.EXCELLENT, AnswerQuality.GOOD):
+                if analysis.is_factually_correct:
+                    for topic in analysis.detected_topics:
+                        if topic not in self._state.confirmed_skills:
+                            self._state.confirmed_skills.append(topic)
 
         if not analysis.is_factually_correct or analysis.quality == AnswerQuality.WRONG:
-            gap: dict[str, str] = {
+            gap: dict[str, str | None] = {
                 "topic": (
                     ", ".join(analysis.detected_topics)
                     if analysis.detected_topics

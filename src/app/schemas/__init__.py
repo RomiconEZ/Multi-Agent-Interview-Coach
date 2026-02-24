@@ -18,6 +18,7 @@ from .feedback import (
     Verdict,
 )
 from .interview import (
+    UNANSWERED_RESPONSE_TYPES,
     AnswerQuality,
     CandidateInfo,
     DifficultyLevel,
@@ -47,6 +48,7 @@ __all__ = [
     "SoftSkillsReview",
     "TechnicalReview",
     "Verdict",
+    "UNANSWERED_RESPONSE_TYPES",
     "AnswerQuality",
     "CandidateInfo",
     "DifficultyLevel",

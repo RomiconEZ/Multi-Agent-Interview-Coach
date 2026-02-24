@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Final
 
+from .base import BaseAgent
 from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient, LLMClientError
 from ..schemas.agent_settings import SingleAgentConfig
@@ -19,10 +20,17 @@ from ..schemas.interview import (
     ObserverAnalysis,
     ResponseType,
 )
-from .base import BaseAgent
+
+_HISTORY_WINDOW_TURNS: Final[int] = 10
+"""
+Максимальное количество ходов интервью, передаваемых в историю
+сообщений для Interviewer LLM.
+
+Ограничивает рост контекста и предотвращает превышение окна
+контекста модели при длинных интервью.
+"""
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
-
 
 INTERVIEWER_SYSTEM_PROMPT = """\
 <role>
@@ -101,7 +109,7 @@ INTERVIEWER_SYSTEM_PROMPT = """\
 2. Краткий нейтральный ответ (1–3 предложения).
    Допустимо: «Обычно...», «Зависит от проекта...», «Детали обсудим после технической части.»
    Если кандидат задал несколько вопросов — ответь на каждый кратко.
-3. Если активный вопрос НЕ закрыт — повтори ЕГО ЖЕ (дословно, без смены темы/технологии/примера).
+3. Если активный вопрос НЕ закрыт — повтори ЕГО ЖЕ (дословно, без смены темы/технологии/примера) после нейтрального ответа на встречный вопрос.
 4. Если активный вопрос закрыт — задай следующий технический вопрос.
 5. НЕ задавай уточняющих вопросов по теме компании/процессов.
 6. НЕ вводи новые примеры/задачи/сценарии.
@@ -214,11 +222,11 @@ class InterviewerAgent(BaseAgent):
             return "Привет! Расскажите немного о себе и своём опыте в разработке."
 
     async def process(
-        self,
-        state: InterviewState,
-        analysis: ObserverAnalysis,
-        user_message: str,
-        **kwargs: Any,
+            self,
+            state: InterviewState,
+            analysis: ObserverAnalysis,
+            user_message: str,
+            **kwargs: Any,
     ) -> tuple[str, list[InternalThought]]:
         """
         Генерирует следующую реплику на основе анализа.
@@ -232,7 +240,7 @@ class InterviewerAgent(BaseAgent):
 
         context: str = self._build_response_context(state, analysis, user_message)
         messages: list[dict[str, str]] = self._build_messages(
-            context, state.get_conversation_history()
+            context, state.get_conversation_history(_HISTORY_WINDOW_TURNS)
         )
 
         interviewer_thought = InternalThought(
@@ -262,10 +270,10 @@ class InterviewerAgent(BaseAgent):
             return self._generate_fallback_response(analysis), thoughts
 
     def _build_response_context(
-        self,
-        state: InterviewState,
-        analysis: ObserverAnalysis,
-        user_message: str,
+            self,
+            state: InterviewState,
+            analysis: ObserverAnalysis,
+            user_message: str,
     ) -> str:
         """
         Строит контекст для генерации ответа.
@@ -308,6 +316,8 @@ class InterviewerAgent(BaseAgent):
             state.turns[-1].agent_visible_message if state.turns else ""
         )
 
+        answered_status: str = "ДА" if analysis.answered_last_question else "НЕТ"
+
         context_parts.extend(
             [
                 "",
@@ -329,6 +339,7 @@ class InterviewerAgent(BaseAgent):
                 f"- Тип ответа: {analysis.response_type.value}",
                 f"- Качество: {analysis.quality.value}",
                 f"- Фактически верно: {analysis.is_factually_correct}",
+                f"- Кандидат ответил на последний вопрос: {answered_status}",
                 f"- Рекомендация: {analysis.recommendation}",
             ]
         )
@@ -347,12 +358,12 @@ class InterviewerAgent(BaseAgent):
         return "\n".join(context_parts)
 
     def _get_response_instruction(
-        self,
-        analysis: ObserverAnalysis,
-        state: InterviewState,
+            self,
+            analysis: ObserverAnalysis,
+            state: InterviewState,
     ) -> str:
         """
-        Возвращает инструкцию в зависимости от типа ответа.
+        Возвращает инструкцию в зависимости от типа ответа и статуса якоря.
 
         :param analysis: Анализ от Observer.
         :param state: Состояние интервью.
@@ -376,8 +387,8 @@ class InterviewerAgent(BaseAgent):
 
         if response_type == ResponseType.HALLUCINATION:
             correct: str = (
-                analysis.correct_answer
-                or "информацию можно найти в официальной документации"
+                    analysis.correct_answer
+                    or "информацию можно найти в официальной документации"
             )
             return (
                 "ВАЖНО: Кандидат сказал фактически неверную информацию (галлюцинация). "
@@ -411,6 +422,18 @@ class InterviewerAgent(BaseAgent):
             return (
                 "Ответ неполный. Попроси уточнить или раскрыть тему глубже, "
                 "или помоги кандидату наводящим вопросом по текущей теме."
+            )
+
+        # Для EXCELLENT и NORMAL (default) — проверяем якорь программно.
+        # Если кандидат НЕ ответил на последний вопрос, повторяем его
+        # вместо перехода к следующему.
+
+        if not analysis.answered_last_question:
+            return (
+                "КРИТИЧНО: Кандидат НЕ ответил на последний технический вопрос. "
+                "НЕ задавай новый вопрос. "
+                "Повтори активный вопрос (см. 'АКТИВНЫЙ ЯКОРЬ') ДОСЛОВНО "
+                "и попроси кандидата ответить на него."
             )
 
         if response_type == ResponseType.EXCELLENT:
@@ -463,17 +486,23 @@ class InterviewerAgent(BaseAgent):
         :param analysis: Анализ от Observer.
         :return: Текст мысли.
         """
+        anchor_status: str = (
+            "Кандидат ответил на вопрос."
+            if analysis.answered_last_question
+            else "Кандидат НЕ ответил на вопрос — повторяю активный якорь."
+        )
+
         base_thoughts: dict[ResponseType, str] = {
             ResponseType.INTRODUCTION: "Кандидат представился. Анализирую опыт и технологии для релевантных вопросов.",
-            ResponseType.HALLUCINATION: f"ALERT: Кандидат галлюцинирует! Корректирую ошибку и возвращаюсь к активному техническому вопросу. Рекомендация: {analysis.recommendation}",
-            ResponseType.OFF_TOPIC: "Кандидат пытается сменить тему. Возвращаю к активному техническому вопросу и не меняю тему.",
-            ResponseType.QUESTION: "Кандидат задал встречный вопрос — отвечаю и затем возвращаюсь к активному техническому вопросу, без смены темы.",
-            ResponseType.EXCELLENT: f"Отличный ответ! Уровень {analysis.quality.value}. Можно усложнить вопросы.",
-            ResponseType.INCOMPLETE: "Неполный или уклончивый ответ. Попрошу раскрыть тему или дам подсказку.",
+            ResponseType.HALLUCINATION: f"ALERT: Кандидат галлюцинирует! Корректирую ошибку и возвращаюсь к активному техническому вопросу. {anchor_status} Рекомендация: {analysis.recommendation}",
+            ResponseType.OFF_TOPIC: f"Кандидат пытается сменить тему. {anchor_status} Возвращаю к активному техническому вопросу.",
+            ResponseType.QUESTION: f"Кандидат задал встречный вопрос — отвечаю и возвращаюсь к активному техническому вопросу. {anchor_status}",
+            ResponseType.EXCELLENT: f"Отличный ответ! Уровень {analysis.quality.value}. {anchor_status} Можно усложнить вопросы.",
+            ResponseType.INCOMPLETE: f"Неполный или уклончивый ответ. {anchor_status} Попрошу раскрыть тему или дам подсказку.",
         }
         return base_thoughts.get(
             analysis.response_type,
-            f"Анализ: качество={analysis.quality.value}, корректность={analysis.is_factually_correct}. Рекомендация: {analysis.recommendation}",
+            f"Анализ: качество={analysis.quality.value}, корректность={analysis.is_factually_correct}. {anchor_status} Рекомендация: {analysis.recommendation}",
         )
 
     def _generate_fallback_response(self, analysis: ObserverAnalysis) -> str:

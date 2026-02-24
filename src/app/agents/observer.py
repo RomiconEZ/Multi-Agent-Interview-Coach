@@ -13,6 +13,7 @@ from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient, LLMClientError
 from ..schemas.agent_settings import SingleAgentConfig
 from ..schemas.interview import (
+    UNANSWERED_RESPONSE_TYPES,
     AnswerQuality,
     InternalThought,
     InterviewState,
@@ -41,6 +42,11 @@ OBSERVER_SYSTEM_PROMPT = """\
 - Направленной на сохранение активного технического вопроса.
 
 Всегда определяй: ответил ли кандидат на последний технический вопрос Interviewer.
+Устанавливай поле "answered_last_question" в true или false.
+
+Правила для answered_last_question:
+- true: кандидат дал ответ на последний технический вопрос (даже если неполный или неверный — он ПОПЫТАЛСЯ ответить по теме вопроса).
+- false: кандидат НЕ ответил на вопрос (ушёл от темы, задал встречный вопрос, галлюцинировал НЕ по теме вопроса, дал команду стоп).
 
 Обязательные маркеры в конце recommendation:
 - ANSWERED_LAST_QUESTION=YES|NO
@@ -66,7 +72,11 @@ OBSERVER_SYSTEM_PROMPT = """\
 - quality = "wrong"
 - thoughts = "ALERT: Галлюцинация. [Что неверно]. Red flag."
 - correct_answer = "правильная информация"
-- Если кандидат НЕ ответил на последний вопрос:
+- Если галлюцинация ПО ТЕМЕ вопроса (кандидат пытался ответить, но неверно):
+  answered_last_question = true
+  ANSWERED_LAST_QUESTION=YES; NEXT_STEP=ASK_FOLLOWUP
+- Если галлюцинация НЕ по теме вопроса (кандидат уклонился):
+  answered_last_question = false
   recommendation → «корректно поправить и повторить последний технический вопрос»
   ANSWERED_LAST_QUESTION=NO; NEXT_STEP=REPEAT_LAST_QUESTION
 </rule>
@@ -74,6 +84,7 @@ OBSERVER_SYSTEM_PROMPT = """\
 <rule id="2" name="Детекция off-topic">
 Попытки уйти от темы интервью, уклонение от ответа:
 - response_type = "off_topic"
+- answered_last_question = false
 - Если кандидат НЕ ответил на последний вопрос:
   ANSWERED_LAST_QUESTION=NO; NEXT_STEP=REPEAT_LAST_QUESTION
 </rule>
@@ -81,6 +92,7 @@ OBSERVER_SYSTEM_PROMPT = """\
 <rule id="3" name="Детекция встречных вопросов">
 Кандидат спрашивает о работе/компании/процессах/архитектуре — это НЕ off-topic, это вовлечённость.
 - response_type = "question"
+- answered_last_question = false
 - recommendation: «Кратко ответить (1–3 предложения) и вернуться к активному техническому вопросу.»
 
 Ограничения для Interviewer:
@@ -101,6 +113,7 @@ OBSERVER_SYSTEM_PROMPT = """\
 <rule id="5" name="Намерение завершения">
 Ключевые слова: «стоп», «хватит», «давай фидбэк», «стоп игра», «завершить», «stop».
 - response_type = "stop_command"
+- answered_last_question = false
 </rule>
 
 <rule id="6" name="Описание вакансии">
@@ -149,6 +162,7 @@ OBSERVER_SYSTEM_PROMPT = """\
   "response_type": "<тип из таблицы>",
   "quality": "<качество из таблицы>",
   "is_factually_correct": true|false,
+  "answered_last_question": true|false,
   "detected_topics": ["тема1", "тема2"],
   "recommendation": "рекомендация для Interviewer. ANSWERED_LAST_QUESTION=YES|NO; NEXT_STEP=...",
   "should_simplify": false,
@@ -272,7 +286,7 @@ class ObserverAgent(BaseAgent):
 
 ## ЗАДАЧА
 Проанализируй ответ кандидата и ответь JSON:
-1. Ответил ли кандидат на ПОСЛЕДНИЙ ВОПРОС интервьюера? (YES/NO)
+1. Ответил ли кандидат на ПОСЛЕДНИЙ ВОПРОС интервьюера? Установи answered_last_question=true/false.
 2. Есть ли галлюцинации (Python 4.0, несуществующие функции)?
 3. Это off-topic (попытка сменить тему)?
 4. Это встречный вопрос о работе/компании? (если да — это НЕ off-topic)
@@ -327,6 +341,11 @@ class ObserverAgent(BaseAgent):
         except ValueError:
             quality = AnswerQuality.ACCEPTABLE
 
+        answered_last_question: bool = ObserverAgent._resolve_answered_last_question(
+            response,
+            response_type,
+        )
+
         thoughts_content: str = response.get("thoughts", "Анализ выполнен.")
         thought = InternalThought(
             from_agent="Observer",
@@ -365,7 +384,31 @@ class ObserverAgent(BaseAgent):
             correct_answer=response.get("correct_answer"),
             extracted_info=extracted_info,
             demonstrated_level=response.get("demonstrated_level"),
+            answered_last_question=answered_last_question,
         )
+
+    @staticmethod
+    def _resolve_answered_last_question(
+        response: dict[str, Any],
+        response_type: ResponseType,
+    ) -> bool:
+        """
+        Определяет значение ``answered_last_question``.
+
+        Если LLM вернул поле явно — использует его.
+        Иначе выводит значение из ``response_type``:
+        типы из ``_UNANSWERED_RESPONSE_TYPES`` дают ``False``,
+        остальные — ``True``.
+
+        :param response: Распарсенный JSON-ответ LLM.
+        :param response_type: Распознанный тип ответа.
+        :return: Ответил ли кандидат на последний вопрос.
+        """
+        raw_value: Any = response.get("answered_last_question")
+        if isinstance(raw_value, bool):
+            return raw_value
+
+        return response_type not in UNANSWERED_RESPONSE_TYPES
 
     def _create_fallback_analysis(self, user_message: str) -> ObserverAnalysis:
         """
@@ -386,6 +429,8 @@ class ObserverAgent(BaseAgent):
         else:
             response_type = ResponseType.NORMAL
 
+        answered: bool = response_type not in UNANSWERED_RESPONSE_TYPES
+
         thought = InternalThought(
             from_agent="Observer",
             to_agent="Interviewer",
@@ -399,4 +444,5 @@ class ObserverAgent(BaseAgent):
             detected_topics=[],
             recommendation="Продолжай интервью",
             thoughts=[thought],
+            answered_last_question=answered,
         )
