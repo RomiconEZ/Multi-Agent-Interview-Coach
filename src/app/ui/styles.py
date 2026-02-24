@@ -461,6 +461,8 @@ MAIN_CSS: Final[str] = """
     font-size: 0.82rem !important;
     line-height: 1.6 !important;
     padding: 14px !important;
+    max-height: 560px !important;
+    overflow-y: auto !important;
 }
 
 /* === LABEL STYLING ================================================ */
@@ -616,7 +618,7 @@ footer {
 
 HEADER_HTML: Final[str] = """
 <div class="app-header">
-    <h1>🎯 Multi-Agent Interview Coach</h1>
+    <h1>Multi-Agent Interview Coach</h1>
     <p>Интеллектуальная система подготовки к техническим интервью с AI-агентами</p>
     <div class="agent-badges">
         <span class="agent-badge badge-observer">👁️ Observer — анализ и факт-чекинг</span>
