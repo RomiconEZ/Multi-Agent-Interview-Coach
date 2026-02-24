@@ -164,7 +164,13 @@ class LLMClient:
         }
 
         if json_mode:
-            payload["response_format"] = {"type": "json_object"}
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": generation_name,
+                    "schema": {"type": "object"},
+                },
+            }
 
         generation = self._langfuse.create_generation(
             trace=self._current_trace,
