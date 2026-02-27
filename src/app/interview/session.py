@@ -14,9 +14,10 @@ from uuid import uuid4
 
 from langfuse.client import StatefulTraceClient
 
+from .logger import InterviewLogger, create_interview_logger
 from ..agents import EvaluatorAgent, InterviewerAgent, ObserverAgent
 from ..core.logger_setup import get_system_logger
-from ..llm.client import LLMClient, create_llm_client
+from ..llm.client import LLMClient, LLMClientError, create_llm_client
 from ..observability import SessionMetrics, get_langfuse_tracker
 from ..schemas.agent_settings import AgentSettings, InterviewConfig
 from ..schemas.feedback import InterviewFeedback
@@ -28,7 +29,6 @@ from ..schemas.interview import (
     InterviewTurn,
     ResponseType,
 )
-from .logger import InterviewLogger, create_interview_logger
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -41,10 +41,10 @@ class InterviewSession:
     """
 
     def __init__(
-        self,
-        llm_client: LLMClient,
-        interview_logger: InterviewLogger,
-        interview_config: InterviewConfig,
+            self,
+            llm_client: LLMClient,
+            interview_logger: InterviewLogger,
+            interview_config: InterviewConfig,
     ) -> None:
         self._llm_client = llm_client
         self._interview_logger = interview_logger
@@ -88,6 +88,7 @@ class InterviewSession:
         Начинает новую сессию интервью.
 
         :return: Приветственное сообщение.
+        :raises LLMClientError: При ошибке генерации приветствия.
         """
         self._state = InterviewState(
             job_description=self._config.job_description,
@@ -133,6 +134,7 @@ class InterviewSession:
 
         :param user_message: Сообщение кандидата.
         :return: Tuple (ответ агента, завершено ли интервью).
+        :raises ValueError: Если сессия не была запущена.
         """
         if self._state is None:
             raise ValueError("Interview session not started")
@@ -155,11 +157,19 @@ class InterviewSession:
             metadata={"turn": self._state.current_turn},
         )
 
-        analysis = await self._observer.process(
-            state=self._state,
-            user_message=user_message,
-            last_question=self._last_agent_message,
-        )
+        try:
+            analysis = await self._observer.process(
+                state=self._state,
+                user_message=user_message,
+                last_question=self._last_agent_message,
+            )
+        except (LLMClientError, ValueError, Exception) as e:
+            logger.error(f"Observer failed: {type(e).__name__}: {e}")
+            return (
+                "Произошла техническая ошибка при обработке. "
+                "Попробуйте отправить сообщение ещё раз.",
+                False,
+            )
 
         logger.debug(
             f"Observer analysis: type={analysis.response_type}, "
@@ -205,11 +215,19 @@ class InterviewSession:
                 f"demonstrated {analysis.demonstrated_level}"
             )
 
-        response, thoughts = await self._interviewer.process(
-            state=self._state,
-            analysis=analysis,
-            user_message=user_message,
-        )
+        try:
+            response, thoughts = await self._interviewer.process(
+                state=self._state,
+                analysis=analysis,
+                user_message=user_message,
+            )
+        except (LLMClientError, Exception) as e:
+            logger.error(f"Interviewer failed: {type(e).__name__}: {e}")
+            return (
+                "Произошла техническая ошибка при генерации ответа. "
+                "Попробуйте отправить сообщение ещё раз.",
+                False,
+            )
 
         self._last_agent_message = response
 
@@ -280,6 +298,8 @@ class InterviewSession:
         Генерирует финальный фидбэк и сохраняет логи.
 
         :return: Tuple (фидбэк, путь к основному логу, путь к детальному логу).
+        :raises ValueError: Если сессия не была запущена.
+        :raises LLMClientError: При ошибке генерации фидбэка.
         """
         if self._state is None:
             raise ValueError("Interview session not started")
@@ -418,9 +438,9 @@ class InterviewSession:
         return mapping.get(grade, DifficultyLevel.BASIC)
 
     def _update_state_from_analysis(
-        self,
-        analysis: Any,
-        user_message: str,
+            self,
+            analysis: Any,
+            user_message: str,
     ) -> None:
         """Обновляет состояние на основе анализа."""
         if self._state is None:
@@ -457,7 +477,7 @@ class InterviewSession:
 
 
 async def create_interview_session(
-    interview_config: InterviewConfig,
+        interview_config: InterviewConfig,
 ) -> InterviewSession:
     """
     Создаёт новую сессию интервью.

@@ -16,10 +16,12 @@ class SingleAgentConfig(BaseModel):
 
     :ivar temperature: Температура генерации LLM (0.0 — детерминированный, 2.0 — максимально креативный).
     :ivar max_tokens: Максимальное количество токенов в ответе LLM.
+    :ivar generation_retries: Количество повторных попыток генерации при ошибке парсинга ответа LLM.
     """
 
     temperature: float = Field(ge=0.0, le=2.0)
     max_tokens: int = Field(ge=64, le=8192)
+    generation_retries: int = Field(ge=0, le=10)
 
     @field_validator("temperature")
     @classmethod
@@ -38,13 +40,19 @@ class AgentSettings(BaseModel):
     """
 
     observer: SingleAgentConfig = Field(
-        default_factory=lambda: SingleAgentConfig(temperature=0.3, max_tokens=1000),
+        default_factory=lambda: SingleAgentConfig(
+            temperature=0.3, max_tokens=1000, generation_retries=2,
+        ),
     )
     interviewer: SingleAgentConfig = Field(
-        default_factory=lambda: SingleAgentConfig(temperature=0.7, max_tokens=800),
+        default_factory=lambda: SingleAgentConfig(
+            temperature=0.7, max_tokens=800, generation_retries=0,
+        ),
     )
     evaluator: SingleAgentConfig = Field(
-        default_factory=lambda: SingleAgentConfig(temperature=0.3, max_tokens=3000),
+        default_factory=lambda: SingleAgentConfig(
+            temperature=0.3, max_tokens=3000, generation_retries=2,
+        ),
     )
 
 

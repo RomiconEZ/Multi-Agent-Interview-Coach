@@ -99,9 +99,15 @@ def _build_interview_config(
         if job_description and job_description.strip()
         else None,
         agent_settings=AgentSettings(
-            observer=SingleAgentConfig(temperature=obs_temp, max_tokens=obs_tokens),
-            interviewer=SingleAgentConfig(temperature=int_temp, max_tokens=int_tokens),
-            evaluator=SingleAgentConfig(temperature=eval_temp, max_tokens=eval_tokens),
+            observer=SingleAgentConfig(
+                temperature=obs_temp, max_tokens=obs_tokens, generation_retries=2,
+            ),
+            interviewer=SingleAgentConfig(
+                temperature=int_temp, max_tokens=int_tokens, generation_retries=0,
+            ),
+            evaluator=SingleAgentConfig(
+                temperature=eval_temp, max_tokens=eval_tokens, generation_retries=2,
+            ),
         ),
     )
 
@@ -142,8 +148,20 @@ async def _start_interview_async(
         eval_tokens,
     )
 
-    _current_session = await create_interview_session(config)
-    greeting: str = await _current_session.start()
+    try:
+        _current_session = await create_interview_session(config)
+        greeting: str = await _current_session.start()
+    except Exception as e:
+        logger.error(f"Failed to start interview: {type(e).__name__}: {e}")
+        _current_session = None
+        return (
+            f"❌ Ошибка запуска интервью: {e}",
+            "",
+            [],
+            "",
+            None,
+            None,
+        )
 
     actual_model: str = _current_session._llm_client.model
     jd_indicator: str = " | 📋 Вакансия задана" if config.job_description else ""
@@ -234,13 +252,35 @@ async def bot_respond(
 
     response: str
     is_finished: bool
-    response, is_finished = await _current_session.process_message(user_message.strip())
+
+    try:
+        response, is_finished = await _current_session.process_message(user_message.strip())
+    except Exception as e:
+        logger.error(f"Unexpected error in process_message: {type(e).__name__}: {e}")
+        return (
+            f"❌ Ошибка: {e}",
+            history,
+            "",
+            None,
+            None,
+        )
 
     updated_history: list[dict[str, str | None]] = list(history)
     updated_history.append({"role": "assistant", "content": response})
 
     if is_finished:
-        feedback, summary_path, detailed_path = await _current_session.generate_feedback()
+        try:
+            feedback, summary_path, detailed_path = await _current_session.generate_feedback()
+        except Exception as e:
+            logger.error(f"Feedback generation failed: {type(e).__name__}: {e}")
+            return (
+                f"❌ Ошибка генерации фидбэка: {e}",
+                updated_history,
+                "",
+                None,
+                None,
+            )
+
         feedback_text: str = feedback.to_formatted_string()
 
         metrics = _current_session.get_session_metrics()
@@ -284,7 +324,18 @@ async def stop_interview(
     if _current_session._state:
         _current_session._state.is_active = False
 
-    feedback, summary_path, detailed_path = await _current_session.generate_feedback()
+    try:
+        feedback, summary_path, detailed_path = await _current_session.generate_feedback()
+    except Exception as e:
+        logger.error(f"Feedback generation failed on stop: {type(e).__name__}: {e}")
+        return (
+            f"❌ Ошибка генерации фидбэка: {e}",
+            history,
+            "",
+            None,
+            None,
+        )
+
     feedback_text: str = feedback.to_formatted_string()
 
     metrics = _current_session.get_session_metrics()

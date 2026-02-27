@@ -126,6 +126,7 @@ class ObserverAnalysis(BaseModel):
     :ivar response_type: Тип ответа.
     :ivar quality: Качество ответа.
     :ivar is_factually_correct: Фактическая корректность.
+    :ivar is_gibberish: Является ли сообщение бессмыслицей (мусор, тест клавиатуры).
     :ivar detected_topics: Обнаруженные темы.
     :ivar recommendation: Рекомендация для интервьюера.
     :ivar thoughts: Мысли наблюдателя.
@@ -140,6 +141,7 @@ class ObserverAnalysis(BaseModel):
     response_type: ResponseType
     quality: AnswerQuality
     is_factually_correct: bool
+    is_gibberish: bool = False
     detected_topics: list[str] = Field(default_factory=list)
     recommendation: str
     thoughts: list[InternalThought] = Field(default_factory=list)
@@ -239,8 +241,8 @@ class InterviewState(BaseModel):
         self.current_turn += 1
 
     def get_conversation_history(
-        self,
-        max_turns: int | None = None,
+            self,
+            max_turns: int | None = None,
     ) -> list[dict[str, str]]:
         """
         Возвращает историю разговора для LLM.
