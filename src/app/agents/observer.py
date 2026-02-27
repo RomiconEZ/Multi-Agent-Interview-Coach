@@ -292,15 +292,19 @@ def _resolve_answered_last_question(
 
 
 def _parse_extracted_info(
-        data: dict[str, Any] | None,
+        data: Any,
 ) -> ExtractedCandidateInfo | None:
     """
     Парсит извлечённую информацию о кандидате.
 
-    :param data: Словарь с данными.
+    Содержит type guard: если LLM вернул не-dict (строку, список, None),
+    возвращает ``None`` без генерации исключения, чтобы не тратить
+    retry-попытки на опциональные данные.
+
+    :param data: Словарь с данными или произвольное значение от LLM.
     :return: ExtractedCandidateInfo или None.
     """
-    if not data:
+    if not isinstance(data, dict):
         return None
 
     has_meaningful_data: bool = any(
@@ -316,5 +320,5 @@ def _parse_extracted_info(
         position=data.get("position"),
         grade=data.get("grade"),
         experience=data.get("experience"),
-        technologies=data.get("technologies", []),
+        technologies=data.get("technologies") or [],
     )

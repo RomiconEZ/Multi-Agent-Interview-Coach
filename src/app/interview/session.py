@@ -132,6 +132,16 @@ class InterviewSession:
         """
         Обрабатывает сообщение пользователя.
 
+        Порядок обработки обеспечивает атомарность мутаций состояния:
+
+        1. Observer анализирует сообщение.
+        2. Обновляется информация о кандидате (идемпотентная операция).
+        3. Применяется корректировка сложности (нужна Interviewer для контекста).
+        4. Interviewer генерирует ответ.
+        5. **Только при успехе Interviewer**: применяются неидемпотентные
+           мутации состояния (topics, skills, gaps, turn counter).
+           При сбое Interviewer — откат сложности, состояние не загрязняется.
+
         :param user_message: Сообщение кандидата.
         :return: Tuple (ответ агента, завершено ли интервью).
         :raises ValueError: Если сессия не была запущена.
@@ -147,9 +157,6 @@ class InterviewSession:
 
         logger.debug(f"Processing user message: {user_message[:50]}...")
 
-        # Увеличиваем счётчик ходов для метрик
-        self._langfuse.increment_turn(self._session_id)
-
         self._langfuse.add_span(
             trace=self._trace,
             name="user_message",
@@ -157,6 +164,7 @@ class InterviewSession:
             metadata={"turn": self._state.current_turn},
         )
 
+        # ── Stage 1: Observer ────────────────────────────────────────────
         try:
             analysis = await self._observer.process(
                 state=self._state,
@@ -189,16 +197,22 @@ class InterviewSession:
             },
         )
 
+        # ── Stage 2: Идемпотентное обновление информации о кандидате ─────
         if analysis.extracted_info:
             self._update_candidate_info(analysis.extracted_info)
 
+        # ── Stage 3: Стоп-команда ────────────────────────────────────────
         if analysis.response_type == ResponseType.STOP_COMMAND:
             if self._state.turns:
                 self._state.turns[-1].internal_thoughts = list(analysis.thoughts)
             self._state.is_active = False
             return "Завершаю интервью и формирую фидбэк...", True
 
-        self._update_state_from_analysis(analysis, user_message)
+        # ── Stage 4: Корректировка сложности (нужна для контекста Interviewer) ──
+        # Сохраняем состояние для отката при сбое Interviewer.
+        saved_difficulty: DifficultyLevel = self._state.current_difficulty
+        saved_good_streak: int = self._state.consecutive_good_answers
+        saved_bad_streak: int = self._state.consecutive_bad_answers
 
         if analysis.answered_last_question:
             self._apply_difficulty_adjustment(analysis)
@@ -215,6 +229,7 @@ class InterviewSession:
                 f"demonstrated {analysis.demonstrated_level}"
             )
 
+        # ── Stage 5: Interviewer ─────────────────────────────────────────
         try:
             response, thoughts = await self._interviewer.process(
                 state=self._state,
@@ -222,12 +237,24 @@ class InterviewSession:
                 user_message=user_message,
             )
         except (LLMClientError, Exception) as e:
+            # Откат корректировки сложности при сбое Interviewer,
+            # чтобы при повторной отправке состояние было консистентным.
+            self._state.current_difficulty = saved_difficulty
+            self._state.consecutive_good_answers = saved_good_streak
+            self._state.consecutive_bad_answers = saved_bad_streak
+
             logger.error(f"Interviewer failed: {type(e).__name__}: {e}")
             return (
                 "Произошла техническая ошибка при генерации ответа. "
                 "Попробуйте отправить сообщение ещё раз.",
                 False,
             )
+
+        # ── Stage 6: Фиксация — мутации только при полном успехе ─────────
+        # Неидемпотентные операции (append в knowledge_gaps, increment_turn)
+        # применяются только после успешной генерации ответа Interviewer.
+        self._langfuse.increment_turn(self._session_id)
+        self._update_state_from_analysis(analysis, user_message)
 
         self._last_agent_message = response
 
@@ -442,7 +469,25 @@ class InterviewSession:
             analysis: Any,
             user_message: str,
     ) -> None:
-        """Обновляет состояние на основе анализа."""
+        """
+        Обновляет состояние интервью на основе анализа Observer.
+
+        Вызывается только после успешной генерации ответа Interviewer,
+        чтобы избежать повреждения состояния при частичных сбоях.
+
+        Логика обновления:
+
+        - ``covered_topics``: пополняются всегда (идемпотентно, проверка дубликатов).
+        - ``confirmed_skills``: только когда кандидат ответил
+          (``answered_last_question=True``), ответ корректный и качественный.
+        - ``knowledge_gaps``: только когда кандидат **пытался ответить**
+          (``answered_last_question=True``), но допустил фактическую ошибку.
+          Бессмыслица, off-topic и встречные вопросы **не** порождают записей о пробелах,
+          так как кандидат не демонстрировал незнание — он просто не отвечал.
+
+        :param analysis: Анализ от Observer.
+        :param user_message: Сообщение кандидата.
+        """
         if self._state is None:
             return
 
@@ -450,12 +495,14 @@ class InterviewSession:
             if topic not in self._state.covered_topics:
                 self._state.covered_topics.append(topic)
 
-        if analysis.answered_last_question:
-            if analysis.quality in (AnswerQuality.EXCELLENT, AnswerQuality.GOOD):
-                if analysis.is_factually_correct:
-                    for topic in analysis.detected_topics:
-                        if topic not in self._state.confirmed_skills:
-                            self._state.confirmed_skills.append(topic)
+        if not analysis.answered_last_question:
+            return
+
+        if analysis.quality in (AnswerQuality.EXCELLENT, AnswerQuality.GOOD):
+            if analysis.is_factually_correct:
+                for topic in analysis.detected_topics:
+                    if topic not in self._state.confirmed_skills:
+                        self._state.confirmed_skills.append(topic)
 
         if not analysis.is_factually_correct or analysis.quality == AnswerQuality.WRONG:
             gap: dict[str, str | None] = {
@@ -471,6 +518,8 @@ class InterviewSession:
 
     async def close(self) -> None:
         """Закрывает сессию и освобождает ресурсы."""
+        if self._session_id:
+            self._langfuse.clear_session_metrics(self._session_id)
         self._langfuse.flush()
         await self._llm_client.close()
         logger.info(f"Interview session closed, session_id={self._session_id}")

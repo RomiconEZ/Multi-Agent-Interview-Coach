@@ -204,11 +204,17 @@ class EvaluatorAgent(BaseAgent):
         """
         Парсит ответ LLM в InterviewFeedback.
 
+        Использует паттерн ``response.get(key) or {}`` вместо
+        ``response.get(key, {})`` для защиты от случая, когда LLM
+        возвращает явный ``null`` в качестве значения вложенного объекта.
+        ``dict.get(key, default)`` возвращает ``default`` только если ключ
+        отсутствует, но НЕ если значение равно ``None``.
+
         :param response: Распарсенный JSON-ответ LLM.
         :param state: Состояние интервью.
         :return: Структурированный фидбэк.
         """
-        verdict_data: dict[str, Any] = response.get("verdict", {})
+        verdict_data: dict[str, Any] = response.get("verdict") or {}
         verdict = Verdict(
             grade=_parse_grade(verdict_data.get("grade", "Junior")),
             hiring_recommendation=_parse_hiring_rec(
@@ -217,17 +223,21 @@ class EvaluatorAgent(BaseAgent):
             confidence_score=min(100, max(0, verdict_data.get("confidence_score", 50))),
         )
 
-        tech_data: dict[str, Any] = response.get("technical_review", {})
+        tech_data: dict[str, Any] = response.get("technical_review") or {}
         technical_review = TechnicalReview(
             confirmed_skills=[
-                SkillAssessment(**s) for s in tech_data.get("confirmed_skills", [])
+                SkillAssessment(**s)
+                for s in (tech_data.get("confirmed_skills") or [])
+                if isinstance(s, dict)
             ],
             knowledge_gaps=[
-                SkillAssessment(**s) for s in tech_data.get("knowledge_gaps", [])
+                SkillAssessment(**s)
+                for s in (tech_data.get("knowledge_gaps") or [])
+                if isinstance(s, dict)
             ],
         )
 
-        soft_data: dict[str, Any] = response.get("soft_skills_review", {})
+        soft_data: dict[str, Any] = response.get("soft_skills_review") or {}
         soft_skills_review = SoftSkillsReview(
             clarity=_parse_clarity(soft_data.get("clarity", "Average")),
             clarity_details=soft_data.get("clarity_details", ""),
@@ -237,9 +247,13 @@ class EvaluatorAgent(BaseAgent):
             engagement_details=soft_data.get("engagement_details", ""),
         )
 
-        roadmap_data: dict[str, Any] = response.get("roadmap", {})
+        roadmap_data: dict[str, Any] = response.get("roadmap") or {}
         roadmap = PersonalRoadmap(
-            items=[RoadmapItem(**item) for item in roadmap_data.get("items", [])],
+            items=[
+                RoadmapItem(**item)
+                for item in (roadmap_data.get("items") or [])
+                if isinstance(item, dict)
+            ],
             summary=roadmap_data.get("summary", "План развития не сформирован"),
         )
 
