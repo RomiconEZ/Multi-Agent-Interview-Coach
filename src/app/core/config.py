@@ -262,6 +262,139 @@ class LangfuseSettings(_SettingsBase):
         return v.strip().rstrip("/") if v else "http://localhost:3000"
 
 
+class GradioUISettings(_SettingsBase):
+    """
+    Настройки Gradio-интерфейса.
+
+    Содержит параметры компоновки UI, диапазоны слайдеров
+    и значения по умолчанию для параметров агентов в интерфейсе.
+
+    :ivar UI_CHAT_HEIGHT: Высота окна чата в пикселях.
+    :ivar UI_MSG_INPUT_LINES: Количество строк поля ввода сообщения.
+    :ivar UI_MSG_INPUT_MAX_LINES: Максимальное количество строк поля ввода сообщения.
+    :ivar UI_JOB_DESC_LINES: Количество строк поля описания вакансии.
+    :ivar UI_JOB_DESC_MAX_LINES: Максимальное количество строк поля описания вакансии.
+    :ivar UI_FEEDBACK_LINES: Количество строк поля фидбэка.
+    :ivar UI_FEEDBACK_MAX_LINES: Максимальное количество строк поля фидбэка.
+    :ivar UI_TEMPERATURE_MIN: Минимальное значение слайдера температуры.
+    :ivar UI_TEMPERATURE_MAX: Максимальное значение слайдера температуры.
+    :ivar UI_TEMPERATURE_STEP: Шаг слайдера температуры.
+    :ivar UI_TOKENS_MIN: Минимальное значение слайдера токенов (Observer, Interviewer).
+    :ivar UI_TOKENS_MAX: Максимальное значение слайдера токенов (Observer, Interviewer).
+    :ivar UI_TOKENS_STEP: Шаг слайдера токенов (Observer, Interviewer).
+    :ivar UI_EVAL_TOKENS_MIN: Минимальное значение слайдера токенов Evaluator.
+    :ivar UI_EVAL_TOKENS_MAX: Максимальное значение слайдера токенов Evaluator.
+    :ivar UI_EVAL_TOKENS_STEP: Шаг слайдера токенов Evaluator.
+    :ivar UI_MAX_TURNS_MIN: Минимальное значение слайдера макс. ходов.
+    :ivar UI_MAX_TURNS_MAX: Максимальное значение слайдера макс. ходов.
+    :ivar UI_MAX_TURNS_STEP: Шаг слайдера макс. ходов.
+    :ivar UI_OBSERVER_DEFAULT_TEMP: Температура Observer по умолчанию в UI.
+    :ivar UI_OBSERVER_DEFAULT_TOKENS: Макс. токенов Observer по умолчанию в UI.
+    :ivar UI_INTERVIEWER_DEFAULT_TEMP: Температура Interviewer по умолчанию в UI.
+    :ivar UI_INTERVIEWER_DEFAULT_TOKENS: Макс. токенов Interviewer по умолчанию в UI.
+    :ivar UI_EVALUATOR_DEFAULT_TEMP: Температура Evaluator по умолчанию в UI.
+    :ivar UI_EVALUATOR_DEFAULT_TOKENS: Макс. токенов Evaluator по умолчанию в UI.
+    """
+
+    # ── Компоновка ────────────────────────────────────────────────────
+    UI_CHAT_HEIGHT: int = 560
+    UI_MSG_INPUT_LINES: int = 2
+    UI_MSG_INPUT_MAX_LINES: int = 6
+    UI_JOB_DESC_LINES: int = 6
+    UI_JOB_DESC_MAX_LINES: int = 15
+    UI_FEEDBACK_LINES: int = 25
+    UI_FEEDBACK_MAX_LINES: int = 50
+
+    # ── Слайдер температуры ───────────────────────────────────────────
+    UI_TEMPERATURE_MIN: float = 0.0
+    UI_TEMPERATURE_MAX: float = 1.5
+    UI_TEMPERATURE_STEP: float = 0.05
+
+    # ── Слайдер токенов (Observer, Interviewer) ───────────────────────
+    UI_TOKENS_MIN: int = 256
+    UI_TOKENS_MAX: int = 8192
+    UI_TOKENS_STEP: int = 64
+
+    # ── Слайдер токенов (Evaluator) ──────────────────────────────────
+    UI_EVAL_TOKENS_MIN: int = 512
+    UI_EVAL_TOKENS_MAX: int = 8192
+    UI_EVAL_TOKENS_STEP: int = 128
+
+    # ── Слайдер макс. ходов ──────────────────────────────────────────
+    UI_MAX_TURNS_MIN: int = 5
+    UI_MAX_TURNS_MAX: int = 50
+    UI_MAX_TURNS_STEP: int = 1
+
+    # ── Значения агентов по умолчанию ────────────────────────────────
+    UI_OBSERVER_DEFAULT_TEMP: float = 0.3
+    UI_OBSERVER_DEFAULT_TOKENS: int = 4000
+    UI_INTERVIEWER_DEFAULT_TEMP: float = 0.7
+    UI_INTERVIEWER_DEFAULT_TOKENS: int = 2000
+    UI_EVALUATOR_DEFAULT_TEMP: float = 0.3
+    UI_EVALUATOR_DEFAULT_TOKENS: int = 8000
+
+    @field_validator("UI_CHAT_HEIGHT")
+    @classmethod
+    def _chat_height_positive(cls, v: int) -> int:
+        """Проверяет, что высота чата положительна."""
+        if v < 100:
+            raise ValueError("UI_CHAT_HEIGHT must be >= 100")
+        return v
+
+    @field_validator("UI_TEMPERATURE_MAX")
+    @classmethod
+    def _temperature_max_positive(cls, v: float) -> float:
+        """Проверяет, что максимальная температура положительна."""
+        if v <= 0:
+            raise ValueError("UI_TEMPERATURE_MAX must be > 0")
+        return v
+
+    @field_validator("UI_TEMPERATURE_STEP")
+    @classmethod
+    def _temperature_step_positive(cls, v: float) -> float:
+        """Проверяет, что шаг температуры положителен."""
+        if v <= 0:
+            raise ValueError("UI_TEMPERATURE_STEP must be > 0")
+        return v
+
+    @field_validator(
+        "UI_TOKENS_MIN",
+        "UI_TOKENS_MAX",
+        "UI_EVAL_TOKENS_MIN",
+        "UI_EVAL_TOKENS_MAX",
+    )
+    @classmethod
+    def _tokens_bounds_positive(cls, v: int) -> int:
+        """Проверяет, что границы токенов положительны."""
+        if v < 1:
+            raise ValueError("Token bounds must be >= 1")
+        return v
+
+    @field_validator("UI_TOKENS_STEP", "UI_EVAL_TOKENS_STEP")
+    @classmethod
+    def _tokens_step_positive(cls, v: int) -> int:
+        """Проверяет, что шаг токенов положителен."""
+        if v < 1:
+            raise ValueError("Token step must be >= 1")
+        return v
+
+    @field_validator("UI_MAX_TURNS_MIN")
+    @classmethod
+    def _max_turns_min_positive(cls, v: int) -> int:
+        """Проверяет, что минимум ходов положителен."""
+        if v < 1:
+            raise ValueError("UI_MAX_TURNS_MIN must be >= 1")
+        return v
+
+    @field_validator("UI_MAX_TURNS_STEP")
+    @classmethod
+    def _max_turns_step_positive(cls, v: int) -> int:
+        """Проверяет, что шаг ходов положителен."""
+        if v < 1:
+            raise ValueError("UI_MAX_TURNS_STEP must be >= 1")
+        return v
+
+
 class Settings(
     AppSettings,
     EnvironmentSettings,
@@ -271,6 +404,7 @@ class Settings(
     LiteLLMSettings,
     InterviewSettings,
     LangfuseSettings,
+    GradioUISettings,
 ):
     pass
 

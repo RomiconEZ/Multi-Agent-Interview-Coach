@@ -605,10 +605,10 @@ def create_gradio_interface() -> gr.Blocks:
 
                         max_turns_slider = gr.Slider(
                             label="Макс. ходов интервью",
-                            minimum=5,
-                            maximum=50,
+                            minimum=settings.UI_MAX_TURNS_MIN,
+                            maximum=settings.UI_MAX_TURNS_MAX,
                             value=settings.MAX_TURNS,
-                            step=1,
+                            step=settings.UI_MAX_TURNS_STEP,
                         )
 
                     # Job description
@@ -620,8 +620,8 @@ def create_gradio_interface() -> gr.Blocks:
                                 "стек технологий, обязанности...\n\n"
                                 "Если оставить пустым — интервью будет общим."
                             ),
-                            lines=6,
-                            max_lines=15,
+                            lines=settings.UI_JOB_DESC_LINES,
+                            max_lines=settings.UI_JOB_DESC_MAX_LINES,
                             elem_classes=["job-desc-input"],
                         )
 
@@ -638,51 +638,51 @@ def create_gradio_interface() -> gr.Blocks:
                             with gr.Group(elem_classes=["agent-config-section"]):
                                 obs_temp = gr.Slider(
                                     label="Температура",
-                                    minimum=0.0,
-                                    maximum=1.5,
-                                    value=0.3,
-                                    step=0.05,
+                                    minimum=settings.UI_TEMPERATURE_MIN,
+                                    maximum=settings.UI_TEMPERATURE_MAX,
+                                    value=settings.UI_OBSERVER_DEFAULT_TEMP,
+                                    step=settings.UI_TEMPERATURE_STEP,
                                 )
                                 obs_tokens = gr.Slider(
                                     label="Макс. токенов",
-                                    minimum=256,
-                                    maximum=4096,
-                                    value=1000,
-                                    step=64,
+                                    minimum=settings.UI_TOKENS_MIN,
+                                    maximum=settings.UI_TOKENS_MAX,
+                                    value=settings.UI_OBSERVER_DEFAULT_TOKENS,
+                                    step=settings.UI_TOKENS_STEP,
                                 )
 
                         with gr.Accordion("🎤 Interviewer", open=False):
                             with gr.Group(elem_classes=["agent-config-section"]):
                                 int_temp = gr.Slider(
                                     label="Температура",
-                                    minimum=0.0,
-                                    maximum=1.5,
-                                    value=0.7,
-                                    step=0.05,
+                                    minimum=settings.UI_TEMPERATURE_MIN,
+                                    maximum=settings.UI_TEMPERATURE_MAX,
+                                    value=settings.UI_INTERVIEWER_DEFAULT_TEMP,
+                                    step=settings.UI_TEMPERATURE_STEP,
                                 )
                                 int_tokens = gr.Slider(
                                     label="Макс. токенов",
-                                    minimum=256,
-                                    maximum=4096,
-                                    value=800,
-                                    step=64,
+                                    minimum=settings.UI_TOKENS_MIN,
+                                    maximum=settings.UI_TOKENS_MAX,
+                                    value=settings.UI_INTERVIEWER_DEFAULT_TOKENS,
+                                    step=settings.UI_TOKENS_STEP,
                                 )
 
                         with gr.Accordion("📊 Evaluator", open=False):
                             with gr.Group(elem_classes=["agent-config-section"]):
                                 eval_temp = gr.Slider(
                                     label="Температура",
-                                    minimum=0.0,
-                                    maximum=1.5,
-                                    value=0.3,
-                                    step=0.05,
+                                    minimum=settings.UI_TEMPERATURE_MIN,
+                                    maximum=settings.UI_TEMPERATURE_MAX,
+                                    value=settings.UI_EVALUATOR_DEFAULT_TEMP,
+                                    step=settings.UI_TEMPERATURE_STEP,
                                 )
                                 eval_tokens = gr.Slider(
                                     label="Макс. токенов",
-                                    minimum=512,
-                                    maximum=8192,
-                                    value=3000,
-                                    step=128,
+                                    minimum=settings.UI_EVAL_TOKENS_MIN,
+                                    maximum=settings.UI_EVAL_TOKENS_MAX,
+                                    value=settings.UI_EVALUATOR_DEFAULT_TOKENS,
+                                    step=settings.UI_EVAL_TOKENS_STEP,
                                 )
 
                     # Action buttons
@@ -722,7 +722,7 @@ def create_gradio_interface() -> gr.Blocks:
                     with gr.TabItem("💬 Интервью", id=0):
                         chatbot = gr.Chatbot(
                             label="Диалог с интервьюером",
-                            height=560,
+                            height=settings.UI_CHAT_HEIGHT,
                             type="messages",
                             elem_classes=["chat-area"],
                             show_copy_button=True,
@@ -744,8 +744,8 @@ def create_gradio_interface() -> gr.Blocks:
                             msg_input = gr.Textbox(
                                 label="Ваш ответ",
                                 placeholder="Введите ваш ответ и нажмите кнопку «Отправить»...",
-                                lines=2,
-                                max_lines=6,
+                                lines=settings.UI_MSG_INPUT_LINES,
+                                max_lines=settings.UI_MSG_INPUT_MAX_LINES,
                                 scale=6,
                                 interactive=False,
                                 elem_classes=["input-area"],
@@ -763,8 +763,8 @@ def create_gradio_interface() -> gr.Blocks:
                         with gr.Group(elem_classes=["feedback-panel"]):
                             feedback_output = gr.Textbox(
                                 label="Финальная оценка",
-                                lines=25,
-                                max_lines=50,
+                                lines=settings.UI_FEEDBACK_LINES,
+                                max_lines=settings.UI_FEEDBACK_MAX_LINES,
                                 interactive=False,
                                 show_copy_button=True,
                                 placeholder="Фидбэк появится здесь после завершения интервью...",

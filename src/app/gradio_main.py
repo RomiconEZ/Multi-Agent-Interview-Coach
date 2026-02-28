@@ -32,7 +32,7 @@ def main() -> None:
     args = parse_args()
 
     print(f"\n{'=' * 60}")
-    print("🎯 Multi-Agent Interview Coach")
+    print("Multi-Agent Interview Coach")
     print(f"{'=' * 60}")
     print(f"Starting server on http://{args.host}:{args.port}")
     if args.share:
