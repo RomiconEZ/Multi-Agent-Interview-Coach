@@ -9,47 +9,15 @@
 
 ---
 
-## Скриншот веб-интерфейса
-
-<!-- SCREENSHOT:GRADIO_MAIN_UI -->
-![gradio_main_ui](assets/img.png)
-
----
-
-## Скриншоты демонстрации работы (Observability + результаты)
-
-Ниже приведены ключевые экраны, демонстрирующие работу системы и сбор метрик.
-
-### Langfuse — Sessions (метрики по интервью-сессиям)
-
-<!-- SCREENSHOT:LANGFUSE_SESSIONS -->
-![langfuse_sessions](assets/langfuze_session.png)
-
-### Langfuse — Generations (вызовы LLM и полезная диагностика)
-
-<!-- SCREENSHOT:LANGFUSE_GENERATIONS -->
-![langfuse_generations](assets/langfuse_generations.png)
-
-### LiteLLM — Usage (потребление токенов)
-
-<!-- SCREENSHOT:LITELLM_USAGE -->
-![litellm_usage](assets/litellm_usage.png)
-
-### Gradio — результаты после завершения интервью
-
-<!-- SCREENSHOT:GRADIO_RESULTS -->
-![gradio_results](assets/gradio_results.png)
-
----
-
 ## Возможности
 
 - Проведение технического интервью в чат-формате.
 - Мультиагентный пайплайн:
-    - анализ ответа кандидата (в т. ч. детекция галлюцинаций / off-topic / встречных вопросов),
+    - анализ ответа кандидата (в т. ч. детекция галлюцинаций / off-topic / встречных вопросов / бессмыслицы),
     - генерация следующего вопроса с адаптацией сложности,
     - формирование финального структурированного фидбэка.
 - Адаптивная сложность вопросов (BASIC → INTERMEDIATE → ADVANCED → EXPERT).
+- Поддержка описания вакансии для персонализации интервью.
 - Сохранение логов интервью:
     - основной лог по формату ТЗ,
     - детальный лог с внутренними мыслями агентов,
@@ -86,17 +54,27 @@
   При выявлении фактически неверных утверждений система маркирует их как ошибку, корректно сообщает правильную
   информацию и фиксирует пробелы в знаниях, не подменяя ответ кандидата.
 
+- **Детекция бессмысленных сообщений.**
+  Система распознаёт случайный набор символов, тесты клавиатуры и спам, и корректно запрашивает повторный ввод,
+  переформулируя текущий вопрос.
+
+- **Атомарность мутаций состояния.**
+  Неидемпотентные изменения состояния применяются только при полном успехе всех агентов. При сбое Interviewer
+  корректировка сложности откатывается к предыдущему значению.
+
 ---
 
 ## Архитектура
 
 ### Основные компоненты
 
-- **Gradio UI** (`src/app/ui/gradio_app.py`): веб-интерфейс и управление сессией.
+- **UI** (`src/app/ui/gradio_app.py`, `src/app/ui/styles.py`): веб-интерфейс и управление сессией.
 - **InterviewSession** (`src/app/interview/session.py`): оркестрация агентов, состояние интервью, лимиты ходов,
   генерация фидбэка, сбор метрик Langfuse.
 - **Агенты** (`src/app/agents/*`): `ObserverAgent`, `InterviewerAgent`, `EvaluatorAgent`.
 - **LLMClient** (`src/app/llm/client.py`): HTTP-клиент к LiteLLM proxy + трекинг generation в Langfuse.
+- **Парсер ответов** (`src/app/llm/response_parser.py`): извлечение JSON и reasoning из текстовых ответов LLM.
+- **Утилита моделей** (`src/app/llm/models.py`): получение списка доступных моделей из LiteLLM API.
 - **LangfuseTracker** (`src/app/observability/langfuse_client.py`): трекинг трейсов/генераций и сбор метрик токенов.
 - **FastAPI backend** (`src/app/main.py`, `src/app/core/setup.py`): приложение, middleware, документация.
 - **Redis cache** (`src/app/utils/cache.py`): хранение connection pool и клиента.
@@ -104,25 +82,26 @@
 
 ### Поток обработки сообщения (высокоуровнево)
 
-1. Пользователь отправляет сообщение в Gradio UI.
-2. `InterviewSession.process_message()`:
+1. Пользователь отправляет сообщение в чат.
+2. **Шаг 1** (`add_user_message`, синхронный, `queue=False`): мгновенно добавляет сообщение в чат, блокирует ввод.
+3. **Шаг 2** (`bot_respond`, async generator): вызывает `InterviewSession.process_message()`:
     - записывает сообщение в последний `InterviewTurn`,
-    - создаёт span `user_message` в Langfuse и увеличивает счётчик ходов,
+    - создаёт span `user_message` в Langfuse,
     - передаёт сообщение в `ObserverAgent.process()` вместе с последним вопросом интервьюера.
-3. `ObserverAgent` возвращает `ObserverAnalysis`:
+4. `ObserverAgent` возвращает `ObserverAnalysis`:
     - тип ответа (normal / hallucination / off_topic / question / stop_command / introduction / incomplete / excellent),
-    - качество ответа,
-    - фактическую корректность,
+    - качество ответа, фактическую корректность, `is_gibberish`, `answered_last_question`,
     - извлечённые данные кандидата (опционально),
     - рекомендацию интервьюеру.
-4. `InterviewSession` обновляет состояние:
-    - `candidate` (name/grade/tech stack),
-    - `covered_topics / confirmed_skills / knowledge_gaps`,
-    - адаптирует `current_difficulty`,
-    - пишет span `observer_analysis` и `difficulty_change` (если был).
-5. `InterviewerAgent.process()` генерирует следующий ответ/вопрос и возвращает также внутренние мысли.
-6. `InterviewSession` создаёт новый `InterviewTurn` с сообщением интервьюера и пишет span `interviewer_response`.
-7. По команде остановки или лимиту ходов:
+5. `InterviewSession` обновляет состояние (атомарно):
+    - `candidate` (name/grade/tech stack) — идемпотентно,
+    - корректирует `current_difficulty` (с сохранением для отката),
+    - пишет span'ы `observer_analysis`, `candidate_info_update`, `difficulty_change`.
+6. `InterviewerAgent.process()` генерирует следующий ответ/вопрос и возвращает внутренние мысли.
+    - при ошибке — откат сложности, состояние не загрязняется.
+7. При успехе: фиксация неидемпотентных мутаций (`covered_topics`, `confirmed_skills`, `knowledge_gaps`, счётчик ходов).
+8. `InterviewSession` создаёт новый `InterviewTurn` с сообщением интервьюера и пишет span `interviewer_response`.
+9. По команде остановки или лимиту ходов:
     - `EvaluatorAgent.process()` формирует `InterviewFeedback`,
     - пишется span `final_feedback`,
     - к трейсу добавляются финальные метрики (token metrics),
@@ -139,6 +118,7 @@
 - Общее для всех агентов:
     - `system_prompt` (абстрактное свойство),
     - сбор сообщений для LLM через `_build_messages()`,
+    - формирование блока описания вакансии через `_build_job_description_block()`,
     - единый асинхронный интерфейс `process(...)`.
 
 ### ObserverAgent (анализ кандидата)
@@ -151,22 +131,27 @@
     - технический ответ, неполный ответ, отличный ответ,
     - встречный вопрос (role reversal),
     - уход от темы (off-topic),
-    - галлюцинация / фактическая ошибка,
+    - галлюцинация / фактическая ошибка (по теме и не по теме вопроса),
+    - бессмыслица (тест клавиатуры),
     - команда завершения.
+- определение `answered_last_question` — ответил ли кандидат на активный технический вопрос.
 - извлечение информации о кандидате из текста: имя, позиция, грейд, опыт, технологии.
 - выдача рекомендаций интервьюеру с маркерами:
-    - `ANSWERED_LAST_QUESTION=YES|NO`
-    - `NEXT_STEP=ASK_NEW_QUESTION|ASK_FOLLOWUP|REPEAT_LAST_QUESTION`
-    - опционально `REASON=...`
+    - `ANSWERED=YES|NO`
+    - `NEXT_STEP=ASK_NEW|REPEAT|FOLLOWUP`
+    - `GIBBERISH_DETECTED=YES|NO`
 
 Что задаётся в промпте (структурно, без текста):
 
 - роль и миссия агента,
+- определения `answered_last_question` и `is_gibberish`,
 - правила классификации ответов и качества,
 - правила детекции галлюцинаций и prompt injection,
 - правила обработки встречных вопросов,
-- требование сохранять «активный технический вопрос»,
+- правила адаптивности сложности,
 - требование возвращать валидный JSON фиксированной схемы.
+
+Retry-логика: при ошибке парсинга ответа LLM повторяет генерацию до `generation_retries` раз.
 
 ### InterviewerAgent (ведение интервью)
 
@@ -175,9 +160,11 @@
 Задачи:
 
 - ведение диалога и постановка ровно одного активного технического вопроса.
+- генерация приветствия (`generate_greeting`) с учётом наличия описания вакансии.
 - адаптация поведения по рекомендациям Observer:
-    - исправление галлюцинаций,
+    - исправление галлюцинаций (по теме → закрыть вопрос и задать новый; не по теме → переформулировать),
     - возврат с off-topic,
+    - обработка бессмыслицы,
     - краткий ответ на встречный вопрос и возврат к активному вопросу,
     - уточняющие вопросы при неполном ответе,
     - усложнение при отличном ответе.
@@ -187,8 +174,8 @@
 
 - роль и стиль общения,
 - правила релевантности вопросов по стеку кандидата,
-- правила «одного активного вопроса» (якоря),
-- правила обработки hallucination/off-topic/question,
+- правила «одного активного вопроса» (якоря) с условиями закрытия,
+- правила обработки hallucination/off-topic/question/gibberish,
 - правила безопасности (prompt injection),
 - формат ответа (естественный текст, без JSON/markdown).
 
@@ -209,10 +196,12 @@
 Что задаётся в промпте (структурно, без текста):
 
 - роль и миссия агента,
+- запрет галлюцинаций в оценке (каждое утверждение должно быть подкреплено репликой из диалога),
 - структура фидбэка и строгий формат JSON,
-- критерии оценки (включая галлюцинации как red flag),
-- требования к стилю (конкретика и примеры из интервью),
+- критерии оценки (галлюцинации, вовлечённость, адекватность уровня, короткие интервью),
 - ограничения безопасности.
+
+Retry-логика: при ошибке парсинга ответа LLM повторяет генерацию до `generation_retries` раз.
 
 ---
 
@@ -221,13 +210,14 @@
 Ключевые директории:
 
 - `src/app/agents/` — агенты (Observer/Interviewer/Evaluator) и общий базовый класс.
+- `src/app/agents/prompts/` — системные промпты агентов.
 - `src/app/interview/` — сессия и логирование интервью.
-- `src/app/llm/` — LLM клиент для LiteLLM.
+- `src/app/llm/` — LLM клиент, парсер ответов, утилита моделей.
 - `src/app/observability/` — Langfuse tracker и метрики токенов сессии.
 - `src/app/core/` — конфигурация, константы, логирование, setup FastAPI.
-- `src/app/ui/` — Gradio интерфейс.
+- `src/app/ui/` — интерфейс и стили.
 - `src/app/middleware/` — middleware (например client cache).
-- `src/app/schemas/` — Pydantic модели интервью и фидбэка.
+- `src/app/schemas/` — Pydantic модели интервью, фидбэка и настроек агентов.
 
 ---
 
@@ -250,12 +240,17 @@
 - `LITELLM_MODEL` — модель по умолчанию (значение `model_name` из конфигурации LiteLLM).
 - `LITELLM_TIMEOUT` — таймаут запросов.
 - `LITELLM_MAX_RETRIES` — количество повторных попыток.
+- `LITELLM_RETRY_BACKOFF_BASE` — базовая задержка для экспоненциального backoff.
+- `LITELLM_RETRY_BACKOFF_MAX` — максимальная задержка для экспоненциального backoff.
+- `LITELLM_MODELS_FETCH_TIMEOUT` — таймаут запроса списка доступных моделей.
 
 ### Интервью
 
 - `INTERVIEW_LOG_DIR` — директория для логов интервью.
 - `TEAM_NAME` — имя команды.
 - `MAX_TURNS` — лимит ходов интервью.
+- `HISTORY_WINDOW_TURNS` — количество последних ходов, передаваемых в контекст LLM Interviewer.
+- `GREETING_MAX_TOKENS` — максимальное количество токенов для генерации приветствия.
 
 ### Redis
 
@@ -299,7 +294,6 @@
 cd llm-gateway-litellm
 cp .env.example .env
 docker compose up -d
-curl -sS "http://localhost:${LITELLM_PORT_EXTERNAL}/health/liveliness"
 ```
 
 Остановка:
@@ -371,11 +365,12 @@ docker compose up --build
 
 - trace на каждую сессию интервью (session_id),
 - generation на каждый LLM вызов (observer/interviewer/evaluator),
-- span’ы ключевых этапов:
+- span'ы ключевых этапов:
     - `greeting`, `user_message`, `observer_analysis`, `interviewer_response`, `final_feedback`,
+    - `candidate_info_update` (при извлечении данных кандидата),
     - `difficulty_change` (если менялась сложность),
     - `session_token_metrics` (финальные метрики).
-- score’ы на трейс:
+- score'ы на трейс:
     - `total_tokens`, `total_turns`, `llm_calls`, `avg_tokens_per_turn`,
     - `confidence_score` (вес: confidence_score/100).
 
@@ -383,23 +378,24 @@ docker compose up --build
 
 - `src/app/observability/langfuse_client.py` — `LangfuseTracker` + `SessionMetrics`.
 - `src/app/llm/client.py` — создаёт Langfuse generation на каждый вызов LLM.
-- `src/app/interview/session.py` — создаёт trace, добавляет span’ы и сохраняет метрики в лог.
+- `src/app/interview/session.py` — создаёт trace, добавляет span'ы и сохраняет метрики в лог.
 
 ### Как отключить
 
 Установить `LANGFUSE_ENABLED=false`.
+
 Также трекинг автоматически отключится, если ключи не заданы (см. логи старта приложения).
 
 ---
 
 ## Использование
 
-### Через Gradio UI
+### Через Web UI
 
 1. Нажать «Начать интервью».
 2. Представиться (имя, позиция/роль, опыт, технологии).
 3. Отвечать на вопросы.
-4. Ввести «стоп» для завершения и генерации фидбэка.
+4. Ввести «стоп» для завершения и генерации фидбэка (или нажать кнопку «Завершить»).
 
 ### Выходные артефакты
 
@@ -440,3 +436,29 @@ docker compose up --build
 pre-commit install
 pre-commit run --all-files
 ```
+
+---
+
+## Демонстрация работы
+
+Ниже приведены ключевые экраны, демонстрирующие работу системы и сбор метрик.
+
+### Скриншот веб-интерфейса
+
+![chat](assets/ui_chat.png)
+
+### Результаты после завершения интервью
+
+![feedback](assets/ui_feedback.png)
+
+### Langfuse — Sessions (метрики по интервью-сессиям)
+
+![langfuse_sessions](assets/langfuze_session.png)
+
+### Langfuse — Generations (вызовы LLM и полезная диагностика)
+
+![langfuse_generations](assets/langfuse_generations.png)
+
+### LiteLLM — Usage (потребление токенов)
+
+![litellm_usage](assets/litellm_usage.png)
