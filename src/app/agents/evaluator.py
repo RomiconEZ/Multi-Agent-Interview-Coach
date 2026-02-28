@@ -108,9 +108,9 @@ class EvaluatorAgent(BaseAgent):
         conversation: str = self._format_conversation(state)
         skills_summary: str = self._format_skills_summary(state)
 
-        candidate_info_parts: list[str] = [
-            f"Имя: {state.participant_name}",
-        ]
+        candidate_info_parts: list[str] = []
+        if state.candidate.name:
+            candidate_info_parts.append(f"Имя: {state.candidate.name}")
         if state.candidate.position:
             candidate_info_parts.append(f"Позиция: {state.candidate.position}")
         if state.candidate.target_grade:
@@ -122,13 +122,24 @@ class EvaluatorAgent(BaseAgent):
                 f"Заявленный опыт: {state.candidate.experience}"
             )
 
+        candidate_block: str = (
+            chr(10).join(candidate_info_parts)
+            if candidate_info_parts
+            else "Данные о кандидате не были извлечены из диалога."
+        )
+
         job_block: str = self._build_job_description_block(state.job_description)
 
+        total_answered: int = sum(
+            1 for turn in state.turns if turn.user_message and turn.user_message.strip()
+        )
+
         return f"""ИНФОРМАЦИЯ О КАНДИДАТЕ:
-{chr(10).join(candidate_info_parts)}
+{candidate_block}
 
 СТАТИСТИКА ИНТЕРВЬЮ:
 Всего ходов: {len(state.turns)}
+Ходов с ответами кандидата: {total_answered}
 Финальный уровень сложности: {state.current_difficulty.name}
 {job_block}
 ИСТОРИЯ ДИАЛОГА:
@@ -137,13 +148,20 @@ class EvaluatorAgent(BaseAgent):
 ПРЕДВАРИТЕЛЬНАЯ ОЦЕНКА НАВЫКОВ:
 {skills_summary}
 
+КРИТИЧЕСКИ ВАЖНО:
+- Основывай оценку ТОЛЬКО на реальных репликах кандидата из ИСТОРИИ ДИАЛОГА выше.
+- НЕ выдумывай факты, утверждения или ошибки, которых НЕ БЫЛО в диалоге.
+- Если кандидат почти ничего не сказал — так и укажи. НЕ додумывай.
+- knowledge_gaps заполняй ТОЛЬКО реальными ошибками из диалога.
+- Если данных мало — оставь списки пустыми и укажи низкий confidence_score.
+
 Сформируй детальный фидбэк по интервью. Следуй инструкциям из output_format:
 1. Напиши рассуждения в <reasoning>...</reasoning>.
 2. Выведи JSON в <r>...</r>.
 
 Учти:
 1. Соответствие заявленного грейда реальному уровню
-2. Были ли галлюцинации или фактические ошибки
+2. Были ли галлюцинации или фактические ошибки (ТОЛЬКО из диалога!)
 3. Как кандидат реагировал на сложные вопросы
 4. Были ли бессмысленные сообщения (мусор, тест клавиатуры)
 5. Soft skills: честность, ясность изложения, вовлечённость
@@ -194,7 +212,7 @@ class EvaluatorAgent(BaseAgent):
         if state.covered_topics:
             lines.append(f"Затронутые темы: {', '.join(state.covered_topics)}")
 
-        return "\n".join(lines) if lines else "Данные отсутствуют"
+        return "\n".join(lines) if lines else "Данные отсутствуют — интервью было слишком коротким."
 
     def _parse_feedback(
             self,

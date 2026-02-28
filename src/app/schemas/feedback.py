@@ -213,11 +213,9 @@ class InterviewLog(BaseModel):
     """
     Лог интервью для сохранения в файл (формат по ТЗ).
 
-    :ivar participant_name: ФИО кандидата.
     :ivar turns: История ходов.
     :ivar final_feedback: Финальный фидбэк.
     """
 
-    participant_name: str
     turns: list[dict[str, object]]
     final_feedback: str | None = None

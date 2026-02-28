@@ -404,7 +404,6 @@ class InterviewSession:
 
         if extracted.name and not self._state.candidate.name:
             self._state.candidate.name = extracted.name
-            self._state.participant_name = extracted.name
             logger.info(f"Extracted candidate name: {extracted.name}")
 
             if self._trace is not None:

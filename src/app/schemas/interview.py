@@ -209,7 +209,6 @@ class InterviewState(BaseModel):
     """
     Состояние интервью.
 
-    :ivar participant_name: ФИО кандидата (для лога).
     :ivar candidate: Информация о кандидате (извлекается из диалога).
     :ivar job_description: Описание вакансии (опционально).
     :ivar turns: История ходов.
@@ -223,7 +222,6 @@ class InterviewState(BaseModel):
     :ivar consecutive_bad_answers: Подряд плохих ответов.
     """
 
-    participant_name: str = "Неизвестный кандидат"
     candidate: CandidateInfo = Field(default_factory=CandidateInfo)
     job_description: str | None = None
     turns: list[InterviewTurn] = Field(default_factory=list)

@@ -630,7 +630,7 @@ def create_gradio_interface() -> gr.Blocks:
                                 "<center style='background: transparent !important;'>"
                                 "<br><br>"
                                 "<h3 style='color: #64748b; background: transparent !important;'>"
-                                "🎯 Добро пожаловать!</h3>"
+                                "Добро пожаловать!</h3>"
                                 "<p style='color: #475569; font-size: 0.9rem; background: transparent !important;'>"
                                 "Настройте параметры слева и нажмите "
                                 "<strong>«Начать интервью»</strong> для начала."
@@ -642,7 +642,7 @@ def create_gradio_interface() -> gr.Blocks:
                         with gr.Row():
                             msg_input = gr.Textbox(
                                 label="Ваш ответ",
-                                placeholder="Введите ваш ответ и нажмите Enter или кнопку «Отправить»...",
+                                placeholder="Введите ваш ответ и нажмите кнопку «Отправить»...",
                                 lines=2,
                                 max_lines=6,
                                 scale=6,
