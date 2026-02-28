@@ -220,7 +220,7 @@ def start_interview(
 def add_user_message(
         message: str,
         history: list[dict[str, str | None]],
-) -> tuple[dict[str, Any], list[dict[str, str | None]], dict[str, Any]]:
+) -> tuple[dict[str, Any], list[dict[str, str | None]], dict[str, Any], str]:
     """
     Мгновенно добавляет сообщение пользователя в историю чата, очищает и блокирует ввод.
 
@@ -232,10 +232,10 @@ def add_user_message(
 
     :param message: Текст сообщения кандидата.
     :param history: Текущая история чата.
-    :return: Tuple (обновление msg_input, обновлённая история, обновление send_btn).
+    :return: Tuple (обновление msg_input, обновлённая история, обновление send_btn, статус).
     """
     if not message or not message.strip():
-        return gr.update(), history, gr.update()
+        return gr.update(), history, gr.update(), gr.update()
 
     updated_history: list[dict[str, str | None]] = list(history)
     updated_history.append({"role": "user", "content": message})
@@ -244,6 +244,7 @@ def add_user_message(
         gr.update(value="", interactive=False),
         updated_history,
         gr.update(interactive=False),
+        "⏳ Генерация ответа...",
     )
 
 
@@ -810,6 +811,7 @@ def create_gradio_interface() -> gr.Blocks:
             msg_input,
             chatbot,
             send_btn,
+            status_output,
         ]
 
         # Выходы для bot_respond (шаг 2) и stop_interview.
@@ -839,7 +841,8 @@ def create_gradio_interface() -> gr.Blocks:
 
         # Паттерн двухшаговой отправки сообщения:
         # Шаг 1 (queue=False, sync): мгновенно добавляет сообщение пользователя
-        #   в чат, очищает и блокирует поле ввода и кнопку отправки.
+        #   в чат, очищает и блокирует поле ввода и кнопку отправки,
+        #   выставляет статус «Генерация ответа...».
         #   Если сообщение пустое — ничего не происходит (ввод не блокируется).
         # Шаг 2 (.then, async generator, show_progress="hidden"):
         #   Обрабатывает сообщение через LLM, отображает ответ.
