@@ -1,3 +1,4 @@
+# Multi-Agent-Interview-Coach/src/app/ui/gradio_app.py
 """
 Gradio интерфейс для Multi-Agent Interview Coach.
 
@@ -92,13 +93,19 @@ def _build_interview_config(
         else None,
         agent_settings=AgentSettings(
             observer=SingleAgentConfig(
-                temperature=obs_temp, max_tokens=obs_tokens, generation_retries=2,
+                temperature=obs_temp,
+                max_tokens=obs_tokens,
+                generation_retries=2,
             ),
             interviewer=SingleAgentConfig(
-                temperature=int_temp, max_tokens=int_tokens, generation_retries=0,
+                temperature=int_temp,
+                max_tokens=int_tokens,
+                generation_retries=0,
             ),
             evaluator=SingleAgentConfig(
-                temperature=eval_temp, max_tokens=eval_tokens, generation_retries=2,
+                temperature=eval_temp,
+                max_tokens=eval_tokens,
+                generation_retries=2,
             ),
         ),
     )
@@ -122,6 +129,22 @@ def _disable_input_controls() -> tuple[dict[str, Any], dict[str, Any]]:
     return gr.update(interactive=False), gr.update(interactive=False)
 
 
+def _append_assistant_message(
+        history: list[dict[str, str | None]],
+        content: str,
+) -> list[dict[str, str | None]]:
+    """
+    Добавляет сообщение ассистента в историю чата.
+
+    :param history: История чата.
+    :param content: Текст сообщения ассистента.
+    :return: Новая история чата.
+    """
+    updated_history: list[dict[str, str | None]] = list(history)
+    updated_history.append({"role": "assistant", "content": content})
+    return updated_history
+
+
 async def _start_interview_async(
         model: str,
         max_turns: int,
@@ -132,7 +155,15 @@ async def _start_interview_async(
         int_tokens: int,
         eval_temp: float,
         eval_tokens: int,
-) -> tuple[str, dict[str, Any], list[dict[str, str | None]], str, str | None, str | None, dict[str, Any]]:
+) -> tuple[
+    str,
+    dict[str, Any],
+    list[dict[str, str | None]],
+    str,
+    str | None,
+    str | None,
+    dict[str, Any],
+]:
     """
     Асинхронно начинает новое интервью.
 
@@ -190,6 +221,34 @@ async def _start_interview_async(
     )
 
 
+def start_interview_prepare() -> tuple[
+    str,
+    dict[str, Any],
+    list[dict[str, str | None]],
+    str,
+    None,
+    None,
+    dict[str, Any],
+]:
+    """
+    Мгновенно обновляет UI при нажатии «Начать интервью».
+
+    Сразу меняет статус и блокирует ввод, не ожидая генерации приветствия.
+
+    :return: Tuple (статус, msg_input, история чата, фидбэк, лог, детальный лог, send_btn).
+    """
+    send_btn_disabled, msg_input_disabled = _disable_input_controls()
+    return (
+        "⏳ Запуск интервью...",
+        msg_input_disabled,
+        [],
+        "",
+        None,
+        None,
+        send_btn_disabled,
+    )
+
+
 def start_interview(
         model: str,
         max_turns: int,
@@ -200,7 +259,15 @@ def start_interview(
         int_tokens: int,
         eval_temp: float,
         eval_tokens: int,
-) -> tuple[str, dict[str, Any], list[dict[str, str | None]], str, str | None, str | None, dict[str, Any]]:
+) -> tuple[
+    str,
+    dict[str, Any],
+    list[dict[str, str | None]],
+    str,
+    str | None,
+    str | None,
+    dict[str, Any],
+]:
     """Синхронная обёртка для старта интервью."""
     return _run_async(
         _start_interview_async(
@@ -251,7 +318,15 @@ def add_user_message(
 async def bot_respond(
         history: list[dict[str, str | None]],
 ) -> AsyncGenerator[
-    tuple[str, list[dict[str, str | None]], str, str | None, str | None, dict[str, Any], dict[str, Any]],
+    tuple[
+        str,
+        list[dict[str, str | None]],
+        str,
+        str | None,
+        str | None,
+        dict[str, Any],
+        dict[str, Any],
+    ],
     None,
 ]:
     """
@@ -261,8 +336,8 @@ async def bot_respond(
     состояний UI (например, сообщения «Формирую фидбэк...» перед генерацией).
 
     При завершении интервью:
-    1. Первый yield — ответ интервьюера + сообщение о генерации фидбэка.
-    2. Второй yield — готовый фидбэк.
+    1. Первый yield — в чат добавляется «Интервью завершено. Формирую фидбэк...».
+    2. Второй yield — в чат добавляется «Фидбэк сгенерирован...», а также отображается фидбэк.
 
     При обычном ходе — единственный yield с ответом и разблокировкой ввода.
 
@@ -278,8 +353,12 @@ async def bot_respond(
     if _current_session is None:
         yield (
             "⚠️ Сначала начните интервью",
-            history, "", None, None,
-            send_btn_disabled, msg_input_disabled,
+            history,
+            "",
+            None,
+            None,
+            send_btn_disabled,
+            msg_input_disabled,
         )
         return
 
@@ -292,8 +371,12 @@ async def bot_respond(
     if not user_message.strip():
         yield (
             "⚠️ Сообщение пустое",
-            history, "", None, None,
-            send_btn_enabled, msg_input_enabled,
+            history,
+            "",
+            None,
+            None,
+            send_btn_enabled,
+            msg_input_enabled,
         )
         return
 
@@ -306,36 +389,51 @@ async def bot_respond(
         logger.error(f"Unexpected error in process_message: {type(e).__name__}: {e}")
         yield (
             f"❌ Ошибка: {e}",
-            history, "", None, None,
-            send_btn_enabled, msg_input_enabled,
+            history,
+            "",
+            None,
+            None,
+            send_btn_enabled,
+            msg_input_enabled,
         )
         return
 
-    updated_history: list[dict[str, str | None]] = list(history)
-    updated_history.append({"role": "assistant", "content": response})
+    updated_history: list[dict[str, str | None]] = _append_assistant_message(
+        history,
+        response,
+    )
 
     if is_finished:
-        updated_history.append(
-            {"role": "assistant", "content": "⏳ Формирую фидбэк..."}
+        updated_history = _append_assistant_message(
+            updated_history,
+            "⏳ Интервью завершено. Формирую фидбэк...",
         )
         yield (
             "⏳ Формирую фидбэк...",
-            updated_history, "", None, None,
-            send_btn_disabled, msg_input_disabled,
+            updated_history,
+            "",
+            None,
+            None,
+            send_btn_disabled,
+            msg_input_disabled,
         )
 
         try:
             feedback, summary_path, detailed_path = await _current_session.generate_feedback()
         except Exception as e:
             logger.error(f"Feedback generation failed: {type(e).__name__}: {e}")
-            updated_history[-1] = {
-                "role": "assistant",
-                "content": f"❌ Ошибка генерации фидбэка: {e}",
-            }
+            updated_history = _append_assistant_message(
+                updated_history,
+                f"❌ Ошибка генерации фидбэка: {e}",
+            )
             yield (
                 f"❌ Ошибка генерации фидбэка: {e}",
-                updated_history, "", None, None,
-                send_btn_disabled, msg_input_disabled,
+                updated_history,
+                "",
+                None,
+                None,
+                send_btn_disabled,
+                msg_input_disabled,
             )
             return
 
@@ -348,17 +446,19 @@ async def bot_respond(
         _last_log_path = summary_path
         _last_detailed_log_path = detailed_path
 
-        updated_history[-1] = {
-            "role": "assistant",
-            "content": "✅ Фидбэк сгенерирован. Перейдите на вкладку «Фидбэк».",
-        }
+        updated_history = _append_assistant_message(
+            updated_history,
+            "✅ Фидбэк сгенерирован. Перейдите на вкладку «Фидбэк».",
+        )
+
         yield (
             "✅ Интервью завершено. Фидбэк сгенерирован.",
             updated_history,
             feedback_text,
             str(summary_path),
             str(detailed_path),
-            send_btn_disabled, msg_input_disabled,
+            send_btn_disabled,
+            msg_input_disabled,
         )
         return
 
@@ -370,23 +470,37 @@ async def bot_respond(
 
     yield (
         status,
-        updated_history, "", None, None,
-        send_btn_enabled, msg_input_enabled,
+        updated_history,
+        "",
+        None,
+        None,
+        send_btn_enabled,
+        msg_input_enabled,
     )
 
 
 async def stop_interview(
         history: list[dict[str, str | None]],
 ) -> AsyncGenerator[
-    tuple[str, list[dict[str, str | None]], str, str | None, str | None, dict[str, Any], dict[str, Any]],
+    tuple[
+        str,
+        list[dict[str, str | None]],
+        str,
+        str | None,
+        str | None,
+        dict[str, Any],
+        dict[str, Any],
+    ],
     None,
 ]:
     """
     Асинхронно завершает интервью и генерирует фидбэк.
 
     Реализован как async generator для двухэтапного обновления UI:
-    1. Мгновенное отображение сообщения «Формирую фидбэк...» и блокировка ввода.
-    2. Генерация и отображение фидбэка.
+    1. Немедленно добавляет в чат сообщение «Интервью завершено. Формирую фидбэк...»
+       и блокирует ввод.
+    2. После генерации добавляет ещё одно сообщение «Фидбэк сгенерирован...»
+       и выводит фидбэк.
 
     :param history: История чата.
     :return: AsyncGenerator, yield-ящий tuple
@@ -399,37 +513,49 @@ async def stop_interview(
     if _current_session is None:
         yield (
             "⚠️ Нет активного интервью",
-            history, "", None, None,
-            send_btn_disabled, msg_input_disabled,
+            history,
+            "",
+            None,
+            None,
+            send_btn_disabled,
+            msg_input_disabled,
         )
         return
 
     if _current_session._state:
         _current_session._state.is_active = False
 
-    updated_history: list[dict[str, str | None]] = list(history)
-    updated_history.append(
-        {"role": "assistant", "content": "⏳ Интервью завершено. Формирую фидбэк..."}
+    updated_history: list[dict[str, str | None]] = _append_assistant_message(
+        history,
+        "⏳ Интервью завершено. Формирую фидбэк...",
     )
 
     yield (
         "⏳ Формирую фидбэк...",
-        updated_history, "", None, None,
-        send_btn_disabled, msg_input_disabled,
+        updated_history,
+        "",
+        None,
+        None,
+        send_btn_disabled,
+        msg_input_disabled,
     )
 
     try:
         feedback, summary_path, detailed_path = await _current_session.generate_feedback()
     except Exception as e:
         logger.error(f"Feedback generation failed on stop: {type(e).__name__}: {e}")
-        updated_history[-1] = {
-            "role": "assistant",
-            "content": f"❌ Ошибка генерации фидбэка: {e}",
-        }
+        updated_history = _append_assistant_message(
+            updated_history,
+            f"❌ Ошибка генерации фидбэка: {e}",
+        )
         yield (
             f"❌ Ошибка генерации фидбэка: {e}",
-            updated_history, "", None, None,
-            send_btn_disabled, msg_input_disabled,
+            updated_history,
+            "",
+            None,
+            None,
+            send_btn_disabled,
+            msg_input_disabled,
         )
         return
 
@@ -442,10 +568,10 @@ async def stop_interview(
     _last_log_path = summary_path
     _last_detailed_log_path = detailed_path
 
-    updated_history[-1] = {
-        "role": "assistant",
-        "content": "✅ Фидбэк сгенерирован. Перейдите на вкладку «Фидбэк».",
-    }
+    updated_history = _append_assistant_message(
+        updated_history,
+        "✅ Фидбэк сгенерирован. Перейдите на вкладку «Фидбэк».",
+    )
 
     yield (
         "✅ Интервью завершено",
@@ -453,12 +579,19 @@ async def stop_interview(
         feedback_text,
         str(summary_path),
         str(detailed_path),
-        send_btn_disabled, msg_input_disabled,
+        send_btn_disabled,
+        msg_input_disabled,
     )
 
 
 async def reset_interview() -> tuple[
-    str, dict[str, Any], list[Any], str, None, None, dict[str, Any],
+    str,
+    dict[str, Any],
+    list[Any],
+    str,
+    None,
+    None,
+    dict[str, Any],
 ]:
     """
     Асинхронно сбрасывает текущее интервью.
@@ -833,10 +966,19 @@ def create_gradio_interface() -> gr.Blocks:
             outputs=[model_dropdown],
         )
 
+        # Двухшаговый старт:
+        # 1) мгновенно меняем статус + блокируем ввод (queue=False),
+        # 2) затем выполняем реальный старт с генерацией приветствия.
         start_btn.click(
+            fn=start_interview_prepare,
+            inputs=[],
+            outputs=all_outputs,
+            queue=False,
+        ).then(
             fn=start_interview,
             inputs=settings_inputs,
             outputs=all_outputs,
+            show_progress="hidden",
         )
 
         # Паттерн двухшаговой отправки сообщения:
@@ -847,7 +989,7 @@ def create_gradio_interface() -> gr.Blocks:
         # Шаг 2 (.then, async generator, show_progress="hidden"):
         #   Обрабатывает сообщение через LLM, отображает ответ.
         #   При завершении интервью — двухэтапный yield: сначала
-        #   «Формирую фидбэк...», затем готовый фидбэк.
+        #   «Интервью завершено. Формирую фидбэк...», затем «Фидбэк сгенерирован...».
         #   По окончании разблокирует ввод (если интервью не завершено).
         send_btn.click(
             fn=add_user_message,
@@ -877,6 +1019,7 @@ def create_gradio_interface() -> gr.Blocks:
             fn=stop_interview,
             inputs=[chatbot],
             outputs=bot_step_outputs,
+            show_progress="hidden",
         )
 
         reset_btn.click(
