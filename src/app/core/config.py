@@ -133,13 +133,19 @@ class LiteLLMSettings(_SettingsBase):
     :ivar LITELLM_MODEL: Имя модели по умолчанию.
     :ivar LITELLM_TIMEOUT: Таймаут запросов в секундах.
     :ivar LITELLM_MAX_RETRIES: Максимальное количество повторных попыток.
+    :ivar LITELLM_RETRY_BACKOFF_BASE: Базовая задержка для экспоненциального backoff (секунды).
+    :ivar LITELLM_RETRY_BACKOFF_MAX: Максимальная задержка для экспоненциального backoff (секунды).
+    :ivar LITELLM_MODELS_FETCH_TIMEOUT: Таймаут запроса списка доступных моделей (секунды).
     """
 
     LITELLM_BASE_URL: str = "http://localhost:4000"
     LITELLM_API_KEY: str = ""
-    LITELLM_MODEL: str = "gpt-4o-mini"
+    LITELLM_MODEL: str = "local_llm"
     LITELLM_TIMEOUT: int = 120
     LITELLM_MAX_RETRIES: int = 3
+    LITELLM_RETRY_BACKOFF_BASE: float = 0.5
+    LITELLM_RETRY_BACKOFF_MAX: float = 30.0
+    LITELLM_MODELS_FETCH_TIMEOUT: float = 10.0
 
     @field_validator("LITELLM_BASE_URL")
     @classmethod
@@ -162,6 +168,30 @@ class LiteLLMSettings(_SettingsBase):
             raise ValueError("LITELLM_MAX_RETRIES must be >= 0")
         return v
 
+    @field_validator("LITELLM_RETRY_BACKOFF_BASE")
+    @classmethod
+    def _backoff_base_positive(cls, v: float) -> float:
+        """Проверяет, что базовая задержка backoff положительна."""
+        if v <= 0:
+            raise ValueError("LITELLM_RETRY_BACKOFF_BASE must be > 0")
+        return v
+
+    @field_validator("LITELLM_RETRY_BACKOFF_MAX")
+    @classmethod
+    def _backoff_max_positive(cls, v: float) -> float:
+        """Проверяет, что максимальная задержка backoff положительна."""
+        if v <= 0:
+            raise ValueError("LITELLM_RETRY_BACKOFF_MAX must be > 0")
+        return v
+
+    @field_validator("LITELLM_MODELS_FETCH_TIMEOUT")
+    @classmethod
+    def _models_fetch_timeout_positive(cls, v: float) -> float:
+        """Проверяет, что таймаут получения списка моделей положителен."""
+        if v <= 0:
+            raise ValueError("LITELLM_MODELS_FETCH_TIMEOUT must be > 0")
+        return v
+
 
 class InterviewSettings(_SettingsBase):
     """
@@ -170,11 +200,15 @@ class InterviewSettings(_SettingsBase):
     :ivar INTERVIEW_LOG_DIR: Директория для хранения логов интервью.
     :ivar TEAM_NAME: Название команды для логов.
     :ivar MAX_TURNS: Максимальное количество ходов в интервью.
+    :ivar HISTORY_WINDOW_TURNS: Количество последних ходов, передаваемых в контекст LLM Interviewer.
+    :ivar GREETING_MAX_TOKENS: Максимальное количество токенов для генерации приветствия.
     """
 
     INTERVIEW_LOG_DIR: Path = Field(default_factory=lambda: Path.cwd() / "interview_logs")
     TEAM_NAME: str = "Interview Coach Team"
     MAX_TURNS: int = 20
+    HISTORY_WINDOW_TURNS: int = 10
+    GREETING_MAX_TOKENS: int = 300
 
     @field_validator("INTERVIEW_LOG_DIR")
     @classmethod
@@ -188,6 +222,22 @@ class InterviewSettings(_SettingsBase):
     def _max_turns_positive(cls, v: int) -> int:
         if v < 1:
             raise ValueError("MAX_TURNS must be >= 1")
+        return v
+
+    @field_validator("HISTORY_WINDOW_TURNS")
+    @classmethod
+    def _history_window_positive(cls, v: int) -> int:
+        """Проверяет, что окно истории положительно."""
+        if v < 1:
+            raise ValueError("HISTORY_WINDOW_TURNS must be >= 1")
+        return v
+
+    @field_validator("GREETING_MAX_TOKENS")
+    @classmethod
+    def _greeting_max_tokens_positive(cls, v: int) -> int:
+        """Проверяет, что макс. токенов приветствия положительно."""
+        if v < 1:
+            raise ValueError("GREETING_MAX_TOKENS must be >= 1")
         return v
 
 

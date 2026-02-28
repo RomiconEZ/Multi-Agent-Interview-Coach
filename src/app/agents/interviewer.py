@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Final
+from typing import Any
 
 from .base import BaseAgent
 from .prompts import INTERVIEWER_SYSTEM_PROMPT
@@ -22,15 +22,6 @@ from ..schemas.interview import (
     ResponseType,
 )
 
-_HISTORY_WINDOW_TURNS: Final[int] = 10
-"""
-Максимальное количество ходов интервью, передаваемых в историю
-сообщений для Interviewer LLM.
-
-Ограничивает рост контекста и предотвращает превышение окна
-контекста модели при длинных интервью.
-"""
-
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
 
@@ -39,10 +30,23 @@ class InterviewerAgent(BaseAgent):
     Агент-интервьюер.
 
     Ведёт диалог, задаёт вопросы, учитывает рекомендации наблюдателя.
+
+    :ivar history_window_turns: Максимальное количество ходов интервью,
+        передаваемых в историю сообщений для LLM.
+    :ivar greeting_max_tokens: Максимальное количество токенов
+        для генерации приветственного сообщения.
     """
 
-    def __init__(self, llm_client: LLMClient, config: SingleAgentConfig) -> None:
+    def __init__(
+            self,
+            llm_client: LLMClient,
+            config: SingleAgentConfig,
+            history_window_turns: int,
+            greeting_max_tokens: int,
+    ) -> None:
         super().__init__("Interviewer_Agent", llm_client, config)
+        self._history_window_turns = history_window_turns
+        self._greeting_max_tokens = greeting_max_tokens
 
     @property
     def system_prompt(self) -> str:
@@ -97,7 +101,7 @@ class InterviewerAgent(BaseAgent):
         response: str = await self._llm_client.complete(
             messages,
             temperature=self._config.temperature,
-            max_tokens=300,
+            max_tokens=self._greeting_max_tokens,
             generation_name="interviewer_greeting",
         )
         return response.strip()
@@ -122,7 +126,7 @@ class InterviewerAgent(BaseAgent):
 
         context: str = self._build_response_context(state, analysis, user_message)
         messages: list[dict[str, str]] = self._build_messages(
-            context, state.get_conversation_history(_HISTORY_WINDOW_TURNS)
+            context, state.get_conversation_history(self._history_window_turns)
         )
 
         interviewer_thought = InternalThought(

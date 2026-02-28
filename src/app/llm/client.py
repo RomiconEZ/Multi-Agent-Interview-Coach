@@ -20,8 +20,6 @@ from ..observability import get_langfuse_tracker
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
-_RETRY_BACKOFF_BASE: float = 0.5
-_RETRY_BACKOFF_MAX: float = 30.0
 _RETRYABLE_HTTP_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
 
 
@@ -39,21 +37,27 @@ class LLMClient:
     :ivar model: Имя модели.
     :ivar timeout: Таймаут запросов.
     :ivar max_retries: Максимальное число повторных попыток.
+    :ivar retry_backoff_base: Базовая задержка для экспоненциального backoff (секунды).
+    :ivar retry_backoff_max: Максимальная задержка для экспоненциального backoff (секунды).
     """
 
     def __init__(
-        self,
-        base_url: str,
-        model: str,
-        api_key: str,
-        timeout: int,
-        max_retries: int,
+            self,
+            base_url: str,
+            model: str,
+            api_key: str,
+            timeout: int,
+            max_retries: int,
+            retry_backoff_base: float,
+            retry_backoff_max: float,
     ) -> None:
         self._base_url = base_url
         self._model = model
         self._api_key = api_key
         self._timeout = timeout
         self._max_retries = max_retries
+        self._retry_backoff_base = retry_backoff_base
+        self._retry_backoff_max = retry_backoff_max
         self._client: httpx.AsyncClient | None = None
         self._langfuse = get_langfuse_tracker()
         self._current_trace: StatefulTraceClient | None = None
@@ -66,9 +70,9 @@ class LLMClient:
         return self._model
 
     def set_trace(
-        self,
-        trace: StatefulTraceClient | None,
-        session_id: str | None,
+            self,
+            trace: StatefulTraceClient | None,
+            session_id: str | None,
     ) -> None:
         """
         Устанавливает текущий трейс для LLM вызовов.
@@ -112,15 +116,17 @@ class LLMClient:
             await self._client.aclose()
             self._client = None
 
-    @staticmethod
-    def _compute_retry_delay(attempt: int) -> float:
+    def _compute_retry_delay(self, attempt: int) -> float:
         """
         Вычисляет задержку перед повторной попыткой с экспоненциальным backoff.
 
         :param attempt: Номер текущей попытки (0-based).
         :return: Задержка в секундах.
         """
-        return min(_RETRY_BACKOFF_BASE * (2**attempt), _RETRY_BACKOFF_MAX)
+        return min(
+            self._retry_backoff_base * (2 ** attempt),
+            self._retry_backoff_max,
+        )
 
     @staticmethod
     def _is_json_mode_unsupported_error(error_text: str) -> bool:
@@ -132,16 +138,16 @@ class LLMClient:
         """
         lower: str = error_text.lower()
         return "response_format" in lower or (
-            "json_object" in lower and ("400" in lower or "bad" in lower)
+                "json_object" in lower and ("400" in lower or "bad" in lower)
         )
 
     async def complete(
-        self,
-        messages: list[dict[str, str]],
-        temperature: float,
-        max_tokens: int,
-        generation_name: str,
-        json_mode: bool = False,
+            self,
+            messages: list[dict[str, str]],
+            temperature: float,
+            max_tokens: int,
+            generation_name: str,
+            json_mode: bool = False,
     ) -> str:
         """
         Выполняет запрос к LLM.
@@ -310,7 +316,7 @@ class LLMClient:
         end: int = cleaned.rfind("}")
         if start != -1 and end > start:
             try:
-                return json.loads(cleaned[start : end + 1])
+                return json.loads(cleaned[start: end + 1])
             except json.JSONDecodeError:
                 pass
 
@@ -319,11 +325,11 @@ class LLMClient:
         )
 
     async def complete_json(
-        self,
-        messages: list[dict[str, str]],
-        temperature: float,
-        max_tokens: int,
-        generation_name: str,
+            self,
+            messages: list[dict[str, str]],
+            temperature: float,
+            max_tokens: int,
+            generation_name: str,
     ) -> dict[str, Any]:
         """
         Выполняет запрос к LLM с ожиданием JSON ответа.
@@ -386,4 +392,6 @@ def create_llm_client(model: str | None = None) -> LLMClient:
         api_key=settings.LITELLM_API_KEY,
         timeout=settings.LITELLM_TIMEOUT,
         max_retries=settings.LITELLM_MAX_RETRIES,
+        retry_backoff_base=settings.LITELLM_RETRY_BACKOFF_BASE,
+        retry_backoff_max=settings.LITELLM_RETRY_BACKOFF_MAX,
     )

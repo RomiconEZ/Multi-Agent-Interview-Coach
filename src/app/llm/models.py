@@ -18,12 +18,12 @@ from ..core.logger_setup import get_system_logger
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
 _MODELS_ENDPOINT: str = "/v1/models"
-_REQUEST_TIMEOUT_SECONDS: float = 10.0
 
 
 async def fetch_available_models(
-    base_url: str,
-    api_key: str,
+        base_url: str,
+        api_key: str,
+        timeout: float,
 ) -> list[str]:
     """
     Запрашивает список доступных моделей у LiteLLM API.
@@ -33,6 +33,7 @@ async def fetch_available_models(
 
     :param base_url: Базовый URL LiteLLM API.
     :param api_key: API-ключ для авторизации.
+    :param timeout: Таймаут запроса в секундах.
     :return: Отсортированный список имён моделей.
     """
     headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -43,7 +44,7 @@ async def fetch_available_models(
 
     try:
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(_REQUEST_TIMEOUT_SECONDS)
+                timeout=httpx.Timeout(timeout)
         ) as client:
             response: httpx.Response = await client.get(url, headers=headers)
             response.raise_for_status()
@@ -76,14 +77,16 @@ async def fetch_available_models(
 
 
 def fetch_available_models_sync(
-    base_url: str,
-    api_key: str,
+        base_url: str,
+        api_key: str,
+        timeout: float,
 ) -> list[str]:
     """
     Синхронная версия получения списка моделей из LiteLLM API.
 
     :param base_url: Базовый URL LiteLLM API.
     :param api_key: API-ключ для авторизации.
+    :param timeout: Таймаут запроса в секундах.
     :return: Отсортированный список имён моделей.
     """
     headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -93,7 +96,7 @@ def fetch_available_models_sync(
     url: str = f"{base_url.rstrip('/')}{_MODELS_ENDPOINT}"
 
     try:
-        with httpx.Client(timeout=httpx.Timeout(_REQUEST_TIMEOUT_SECONDS)) as client:
+        with httpx.Client(timeout=httpx.Timeout(timeout)) as client:
             response: httpx.Response = client.get(url, headers=headers)
             response.raise_for_status()
 
@@ -139,6 +142,7 @@ def get_models_for_ui() -> list[str]:
     models: list[str] = fetch_available_models_sync(
         base_url=settings.LITELLM_BASE_URL,
         api_key=settings.LITELLM_API_KEY,
+        timeout=settings.LITELLM_MODELS_FETCH_TIMEOUT,
     )
 
     if not models:

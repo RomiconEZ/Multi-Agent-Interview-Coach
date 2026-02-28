@@ -16,6 +16,7 @@ from langfuse.client import StatefulTraceClient
 
 from .logger import InterviewLogger, create_interview_logger
 from ..agents import EvaluatorAgent, InterviewerAgent, ObserverAgent
+from ..core.config import settings
 from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient, LLMClientError, create_llm_client
 from ..observability import SessionMetrics, get_langfuse_tracker
@@ -53,7 +54,12 @@ class InterviewSession:
         agent_cfg: AgentSettings = interview_config.agent_settings
 
         self._observer = ObserverAgent(llm_client, config=agent_cfg.observer)
-        self._interviewer = InterviewerAgent(llm_client, config=agent_cfg.interviewer)
+        self._interviewer = InterviewerAgent(
+            llm_client,
+            config=agent_cfg.interviewer,
+            history_window_turns=settings.HISTORY_WINDOW_TURNS,
+            greeting_max_tokens=settings.GREETING_MAX_TOKENS,
+        )
         self._evaluator = EvaluatorAgent(llm_client, config=agent_cfg.evaluator)
 
         self._state: InterviewState | None = None
