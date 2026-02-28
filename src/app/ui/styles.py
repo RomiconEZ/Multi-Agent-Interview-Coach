@@ -316,8 +316,16 @@ MAIN_CSS: Final[str] = """
     transition: all var(--transition-fast) !important;
 }
 
-.btn-send:hover {
+.btn-send:hover:not(:disabled) {
     background: var(--accent-primary-hover) !important;
+}
+
+.btn-send:disabled,
+.btn-send[disabled] {
+    background: var(--surface-3) !important;
+    cursor: not-allowed !important;
+    opacity: 0.45 !important;
+    box-shadow: none !important;
 }
 
 /* === STATUS BAR =================================================== */
@@ -441,6 +449,11 @@ MAIN_CSS: Final[str] = """
 .input-area textarea:focus {
     border-color: var(--accent-primary) !important;
     box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15) !important;
+}
+
+.input-area textarea:disabled {
+    opacity: 0.55 !important;
+    cursor: not-allowed !important;
 }
 
 /* === FEEDBACK PANEL =============================================== */
