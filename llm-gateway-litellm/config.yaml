@@ -1,7 +1,7 @@
 model_list:
-  - model_name: local_llm
+  - model_name: local-llm
     litellm_params:
-      model: "lm_studio/local_llm"
+      model: "lm_studio/local-llm"
       api_base: "os.environ/LOCAL_LLM_BASE_URL"
       api_key: "os.environ/LOCAL_LLM_API_KEY"
 

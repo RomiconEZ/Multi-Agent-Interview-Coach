@@ -41,17 +41,17 @@ class AgentSettings(BaseModel):
 
     observer: SingleAgentConfig = Field(
         default_factory=lambda: SingleAgentConfig(
-            temperature=0.3, max_tokens=1000, generation_retries=2,
+            temperature=0.3, max_tokens=4096, generation_retries=2,
         ),
     )
     interviewer: SingleAgentConfig = Field(
         default_factory=lambda: SingleAgentConfig(
-            temperature=0.7, max_tokens=800, generation_retries=0,
+            temperature=0.7, max_tokens=4096, generation_retries=0,
         ),
     )
     evaluator: SingleAgentConfig = Field(
         default_factory=lambda: SingleAgentConfig(
-            temperature=0.3, max_tokens=3000, generation_retries=2,
+            temperature=0.3, max_tokens=4096, generation_retries=2,
         ),
     )
 
