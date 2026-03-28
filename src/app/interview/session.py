@@ -14,7 +14,6 @@ from uuid import uuid4
 
 from langfuse.client import StatefulTraceClient
 
-from .logger import InterviewLogger, create_interview_logger
 from ..agents import EvaluatorAgent, InterviewerAgent, ObserverAgent
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger
@@ -30,6 +29,7 @@ from ..schemas.interview import (
     InterviewTurn,
     ResponseType,
 )
+from .logger import InterviewLogger, create_interview_logger
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -42,10 +42,10 @@ class InterviewSession:
     """
 
     def __init__(
-            self,
-            llm_client: LLMClient,
-            interview_logger: InterviewLogger,
-            interview_config: InterviewConfig,
+        self,
+        llm_client: LLMClient,
+        interview_logger: InterviewLogger,
+        interview_config: InterviewConfig,
     ) -> None:
         self._llm_client = llm_client
         self._interview_logger = interview_logger
@@ -93,9 +93,22 @@ class InterviewSession:
         """
         Начинает новую сессию интервью.
 
+        Перед генерацией приветствия выполняет проверку доступности
+        LLM API (health check). При недоступности сервиса сессия
+        не создаётся и выбрасывается исключение с понятным сообщением.
+
         :return: Приветственное сообщение.
-        :raises LLMClientError: При ошибке генерации приветствия.
+        :raises LLMClientError: При недоступности LLM API или ошибке генерации приветствия.
         """
+        # Health check — быстрая проверка доступности LLM API
+        health_ok: bool = await self._llm_client.check_health()
+        if not health_ok:
+            raise LLMClientError(
+                "LLM API is not available. "
+                "Check that LiteLLM proxy is running and accessible "
+                f"at {settings.LITELLM_BASE_URL}"
+            )
+
         self._state = InterviewState(
             job_description=self._config.job_description,
         )
@@ -371,7 +384,7 @@ class InterviewSession:
         summary_path = self._interview_logger.save_session(self._state, feedback)
         detailed_path = self._interview_logger.save_raw_log(self._state, feedback)
 
-        # Сохраняем метрики в детальный лог
+        # Сохраняем метрики (включая стоимость) в детальный лог
         if metrics:
             self._save_metrics_to_log(metrics, detailed_path)
 
@@ -379,7 +392,7 @@ class InterviewSession:
 
     def _save_metrics_to_log(self, metrics: SessionMetrics, log_path: Path) -> None:
         """
-        Добавляет метрики токенов в детальный лог.
+        Добавляет метрики токенов и стоимости в детальный лог.
 
         :param metrics: Метрики сессии.
         :param log_path: Путь к файлу лога.
@@ -393,7 +406,10 @@ class InterviewSession:
             with log_path.open("w", encoding="utf-8") as f:
                 json.dump(log_data, f, ensure_ascii=False, indent=2)
 
-            logger.info(f"Token metrics added to log: {log_path}")
+            logger.info(
+                f"Token metrics added to log: {log_path}, "
+                f"cost=${metrics.get_total_cost():.6f}"
+            )
         except Exception as e:
             logger.error(f"Failed to save metrics to log: {e}")
 
@@ -470,9 +486,9 @@ class InterviewSession:
         return mapping.get(grade, DifficultyLevel.BASIC)
 
     def _update_state_from_analysis(
-            self,
-            analysis: Any,
-            user_message: str,
+        self,
+        analysis: Any,
+        user_message: str,
     ) -> None:
         """
         Обновляет состояние интервью на основе анализа Observer.
@@ -531,7 +547,7 @@ class InterviewSession:
 
 
 async def create_interview_session(
-        interview_config: InterviewConfig,
+    interview_config: InterviewConfig,
 ) -> InterviewSession:
     """
     Создаёт новую сессию интервью.

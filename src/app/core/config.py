@@ -146,6 +146,9 @@ class LiteLLMSettings(_SettingsBase):
     LITELLM_RETRY_BACKOFF_BASE: float = 0.5
     LITELLM_RETRY_BACKOFF_MAX: float = 30.0
     LITELLM_MODELS_FETCH_TIMEOUT: float = 10.0
+    LITELLM_HEALTH_CHECK_TIMEOUT: float = 5.0
+    LITELLM_CIRCUIT_BREAKER_THRESHOLD: int = 5
+    LITELLM_CIRCUIT_BREAKER_RECOVERY: float = 60.0
 
     @field_validator("LITELLM_BASE_URL")
     @classmethod
@@ -192,6 +195,30 @@ class LiteLLMSettings(_SettingsBase):
             raise ValueError("LITELLM_MODELS_FETCH_TIMEOUT must be > 0")
         return v
 
+    @field_validator("LITELLM_HEALTH_CHECK_TIMEOUT")
+    @classmethod
+    def _health_check_timeout_positive(cls, v: float) -> float:
+        """Проверяет, что таймаут health check положителен."""
+        if v <= 0:
+            raise ValueError("LITELLM_HEALTH_CHECK_TIMEOUT must be > 0")
+        return v
+
+    @field_validator("LITELLM_CIRCUIT_BREAKER_THRESHOLD")
+    @classmethod
+    def _cb_threshold_positive(cls, v: int) -> int:
+        """Проверяет, что порог circuit breaker положителен."""
+        if v < 1:
+            raise ValueError("LITELLM_CIRCUIT_BREAKER_THRESHOLD must be >= 1")
+        return v
+
+    @field_validator("LITELLM_CIRCUIT_BREAKER_RECOVERY")
+    @classmethod
+    def _cb_recovery_positive(cls, v: float) -> float:
+        """Проверяет, что таймаут восстановления circuit breaker положителен."""
+        if v <= 0:
+            raise ValueError("LITELLM_CIRCUIT_BREAKER_RECOVERY must be > 0")
+        return v
+
 
 class InterviewSettings(_SettingsBase):
     """
@@ -204,7 +231,9 @@ class InterviewSettings(_SettingsBase):
     :ivar GREETING_MAX_TOKENS: Максимальное количество токенов для генерации приветствия.
     """
 
-    INTERVIEW_LOG_DIR: Path = Field(default_factory=lambda: Path.cwd() / "interview_logs")
+    INTERVIEW_LOG_DIR: Path = Field(
+        default_factory=lambda: Path.cwd() / "interview_logs"
+    )
     TEAM_NAME: str = "Interview Coach Team"
     MAX_TURNS: int = 20
     HISTORY_WINDOW_TURNS: int = 10

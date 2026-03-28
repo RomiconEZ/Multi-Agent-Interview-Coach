@@ -1,13 +1,12 @@
 """
 Клиент для интеграции с Langfuse (self-hosted / локальный).
 
-Предоставляет трекинг LLM вызовов и сессий интервью с метриками по токенам.
+Предоставляет трекинг LLM вызовов и сессий интервью с метриками по токенам и стоимости.
 """
 
 from __future__ import annotations
 
 import logging
-
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,24 +21,27 @@ logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
 @dataclass
 class TokenUsage:
-    """Статистика использования токенов."""
+    """Статистика использования токенов и стоимости."""
 
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    cost_usd: float = 0.0
 
-    def add(self, input_tokens: int, output_tokens: int) -> None:
-        """Добавляет токены к статистике."""
+    def add(self, input_tokens: int, output_tokens: int, cost_usd: float) -> None:
+        """Добавляет токены и стоимость к статистике."""
         self.input_tokens += input_tokens
         self.output_tokens += output_tokens
         self.total_tokens += input_tokens + output_tokens
+        self.cost_usd += cost_usd
 
-    def to_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, int | float]:
         """Преобразует в словарь."""
         return {
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
+            "cost_usd": round(self.cost_usd, 6),
         }
 
 
@@ -48,7 +50,7 @@ class SessionMetrics:
     """
     Метрики сессии интервью.
 
-    Собирает статистику по токенам для всего диалога и по агентам.
+    Собирает статистику по токенам и стоимости для всего диалога и по агентам.
     """
 
     total_usage: TokenUsage = field(default_factory=TokenUsage)
@@ -70,6 +72,7 @@ class SessionMetrics:
         generation_name: str,
         input_tokens: int,
         output_tokens: int,
+        cost_usd: float,
     ) -> None:
         """
         Добавляет метрики генерации.
@@ -77,19 +80,20 @@ class SessionMetrics:
         :param generation_name: Имя генерации (для определения агента).
         :param input_tokens: Входные токены.
         :param output_tokens: Выходные токены.
+        :param cost_usd: Стоимость вызова в USD.
         """
-        self.total_usage.add(input_tokens, output_tokens)
+        self.total_usage.add(input_tokens, output_tokens, cost_usd)
         self.generation_count += 1
 
         name_lower = generation_name.lower()
         if "observer" in name_lower:
-            self.observer_usage.add(input_tokens, output_tokens)
+            self.observer_usage.add(input_tokens, output_tokens, cost_usd)
             self.observer_calls += 1
         elif "interviewer" in name_lower:
-            self.interviewer_usage.add(input_tokens, output_tokens)
+            self.interviewer_usage.add(input_tokens, output_tokens, cost_usd)
             self.interviewer_calls += 1
         elif "evaluator" in name_lower:
-            self.evaluator_usage.add(input_tokens, output_tokens)
+            self.evaluator_usage.add(input_tokens, output_tokens, cost_usd)
             self.evaluator_calls += 1
 
     def increment_turn(self) -> None:
@@ -108,6 +112,16 @@ class SessionMetrics:
             return 0.0
         return self.total_usage.total_tokens / self.generation_count
 
+    def get_total_cost(self) -> float:
+        """Возвращает общую стоимость сессии в USD."""
+        return self.total_usage.cost_usd
+
+    def get_cost_per_turn(self) -> float:
+        """Возвращает среднюю стоимость одного хода в USD."""
+        if self.turn_count == 0:
+            return 0.0
+        return self.total_usage.cost_usd / self.turn_count
+
     def to_dict(self) -> dict[str, Any]:
         """Преобразует в словарь для логирования/отправки в Langfuse."""
         return {
@@ -118,6 +132,8 @@ class SessionMetrics:
             "avg_tokens_per_generation": round(
                 self.get_average_tokens_per_generation(), 2
             ),
+            "total_cost_usd": round(self.get_total_cost(), 6),
+            "cost_per_turn_usd": round(self.get_cost_per_turn(), 6),
             "by_agent": {
                 "observer": {
                     **self.observer_usage.to_dict(),
@@ -153,6 +169,14 @@ class SessionMetrics:
             f"  Observer: {self.observer_usage.total_tokens:,} токенов ({self.observer_calls} вызовов)",
             f"  Interviewer: {self.interviewer_usage.total_tokens:,} токенов ({self.interviewer_calls} вызовов)",
             f"  Evaluator: {self.evaluator_usage.total_tokens:,} токенов ({self.evaluator_calls} вызовов)",
+            "",
+            "💰 СТОИМОСТЬ СЕССИИ",
+            "-" * 50,
+            f"Общая стоимость: ${self.get_total_cost():.6f}",
+            f"Стоимость за ход: ${self.get_cost_per_turn():.6f}",
+            f"  Observer: ${self.observer_usage.cost_usd:.6f}",
+            f"  Interviewer: ${self.interviewer_usage.cost_usd:.6f}",
+            f"  Evaluator: ${self.evaluator_usage.cost_usd:.6f}",
             "=" * 50,
         ]
         return "\n".join(lines)
@@ -162,7 +186,7 @@ class LangfuseTracker:
     """
     Трекер для Langfuse observability (self-hosted / локальный).
 
-    Управляет трейсами и генерациями LLM вызовов с метриками по токенам.
+    Управляет трейсами и генерациями LLM вызовов с метриками по токенам и стоимости.
     """
 
     def __init__(
@@ -231,7 +255,9 @@ class LangfuseTracker:
                 user_id=user_id,
                 metadata=metadata or {},
             )
-            logger.debug(f"Langfuse trace created: name={name}, session_id={session_id}")
+            logger.debug(
+                f"Langfuse trace created: name={name}, session_id={session_id}"
+            )
             return trace
         except Exception as e:
             logger.error(f"Failed to create trace: {e}")
@@ -294,6 +320,7 @@ class LangfuseTracker:
         self,
         generation: StatefulGenerationClient | None,
         output: str,
+        cost_usd: float,
         usage: dict[str, int] | None = None,
         level: str = "DEFAULT",
         status_message: str | None = None,
@@ -305,6 +332,7 @@ class LangfuseTracker:
 
         :param generation: Объект генерации.
         :param output: Выходной текст.
+        :param cost_usd: Стоимость вызова в USD (из LiteLLM proxy).
         :param usage: Статистика использования токенов.
         :param level: Уровень (DEFAULT, DEBUG, WARNING, ERROR).
         :param status_message: Сообщение о статусе.
@@ -330,10 +358,12 @@ class LangfuseTracker:
                     generation_name=generation_name,
                     input_tokens=usage.get("input", 0),
                     output_tokens=usage.get("output", 0),
+                    cost_usd=cost_usd,
                 )
 
         logger.debug(
-            f"Langfuse generation ended: output_len={len(output)}, usage={usage}"
+            f"Langfuse generation ended: output_len={len(output)}, "
+            f"usage={usage}, cost_usd={cost_usd:.6f}"
         )
 
     def end_generation_with_error(
@@ -474,11 +504,24 @@ class LangfuseTracker:
             comment="Average tokens consumed per conversation turn",
         )
 
+        # Метрика стоимости сессии
+        total_cost: float = metrics.get_total_cost()
+        self.score_trace(
+            trace=trace,
+            name="session_cost_usd",
+            value=total_cost,
+            comment=(
+                f"Total session cost: ${total_cost:.6f}, "
+                f"cost per turn: ${metrics.get_cost_per_turn():.6f}"
+            ),
+        )
+
         logger.info(
             f"Session metrics added: session_id={session_id}, "
             f"total_tokens={metrics.total_usage.total_tokens}, "
             f"turns={metrics.turn_count}, "
-            f"generations={metrics.generation_count}"
+            f"generations={metrics.generation_count}, "
+            f"cost_usd=${total_cost:.6f}"
         )
 
     def flush(self) -> None:

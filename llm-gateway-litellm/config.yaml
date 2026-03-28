@@ -38,13 +38,16 @@ model_list:
         revision: main
         auth_token: "123"
 
-
 general_settings:
   store_model_in_db: true
   store_prompts_in_spend_logs: true
 
-
 litellm_settings:
-  request_timeout: 1800    # raise Timeout error if call takes longer than 1800 seconds. Default value is 6000seconds if not set
-  set_verbose: False      # Switch off Debug Logging, ensure your logs do not have any debugging on
-  json_logs: true         # Get debug logs in json format
+  request_timeout: 1800 # raise Timeout error if call takes longer than 1800 seconds. Default value is 6000seconds if not set
+  set_verbose: False # Switch off Debug Logging, ensure your logs do not have any debugging on
+  json_logs: true # Get debug logs in json format
+
+  # Proxy-level reliability: LiteLLM's built-in retry and cooldown at the proxy→backend level
+  num_retries: 2 # retry failed requests to the backend 2 times before returning error to client
+  allowed_fails: 3 # cooldown model deployment if it fails > 3 calls in a minute
+  cooldown_time: 30 # how long (seconds) to cooldown model if fails/min > allowed_fails

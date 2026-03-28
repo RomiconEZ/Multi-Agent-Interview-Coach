@@ -2,6 +2,7 @@
 Клиент для взаимодействия с LiteLLM API.
 
 Предоставляет унифицированный интерфейс для работы с различными LLM через LiteLLM прокси.
+Включает механизмы защиты: circuit breaker, health check, retry с exponential backoff.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from langfuse.client import StatefulTraceClient
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger
 from ..observability import get_langfuse_tracker
+from .circuit_breaker import CircuitBreaker, CircuitBreakerOpen
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -42,14 +44,16 @@ class LLMClient:
     """
 
     def __init__(
-            self,
-            base_url: str,
-            model: str,
-            api_key: str,
-            timeout: int,
-            max_retries: int,
-            retry_backoff_base: float,
-            retry_backoff_max: float,
+        self,
+        base_url: str,
+        model: str,
+        api_key: str,
+        timeout: int,
+        max_retries: int,
+        retry_backoff_base: float,
+        retry_backoff_max: float,
+        health_check_timeout: float,
+        circuit_breaker: CircuitBreaker,
     ) -> None:
         self._base_url = base_url
         self._model = model
@@ -58,6 +62,8 @@ class LLMClient:
         self._max_retries = max_retries
         self._retry_backoff_base = retry_backoff_base
         self._retry_backoff_max = retry_backoff_max
+        self._health_check_timeout = health_check_timeout
+        self._circuit_breaker = circuit_breaker
         self._client: httpx.AsyncClient | None = None
         self._langfuse = get_langfuse_tracker()
         self._current_trace: StatefulTraceClient | None = None
@@ -70,9 +76,9 @@ class LLMClient:
         return self._model
 
     def set_trace(
-            self,
-            trace: StatefulTraceClient | None,
-            session_id: str | None,
+        self,
+        trace: StatefulTraceClient | None,
+        session_id: str | None,
     ) -> None:
         """
         Устанавливает текущий трейс для LLM вызовов.
@@ -110,6 +116,39 @@ class LLMClient:
             )
         return self._client
 
+    async def check_health(self) -> bool:
+        """
+        Проверяет доступность LLM API.
+
+        Выполняет запрос к эндпоинту ``/health/readiness`` LiteLLM proxy.
+        Проверяет готовность прокси принимать запросы (включая соединение с БД),
+        без выполнения реальных LLM-вызовов.
+
+        :return: True если API доступен, False иначе.
+        """
+        try:
+            client: httpx.AsyncClient = await self._get_client()
+            response: httpx.Response = await client.get(
+                "/health/readiness",
+                timeout=httpx.Timeout(self._health_check_timeout),
+            )
+            is_healthy: bool = response.status_code == 200
+            if is_healthy:
+                logger.info(f"LLM API readiness check passed: {self._base_url}")
+            else:
+                logger.warning(
+                    f"LLM API readiness check failed: status={response.status_code}"
+                )
+            return is_healthy
+        except httpx.TimeoutException:
+            logger.warning(
+                f"LLM API readiness check timed out after {self._health_check_timeout}s"
+            )
+            return False
+        except httpx.RequestError as e:
+            logger.warning(f"LLM API readiness check failed: {e}")
+            return False
+
     async def close(self) -> None:
         """Закрывает HTTP клиент."""
         if self._client is not None and not self._client.is_closed:
@@ -124,7 +163,7 @@ class LLMClient:
         :return: Задержка в секундах.
         """
         return min(
-            self._retry_backoff_base * (2 ** attempt),
+            self._retry_backoff_base * (2**attempt),
             self._retry_backoff_max,
         )
 
@@ -138,16 +177,37 @@ class LLMClient:
         """
         lower: str = error_text.lower()
         return "response_format" in lower or (
-                "json_object" in lower and ("400" in lower or "bad" in lower)
+            "json_object" in lower and ("400" in lower or "bad" in lower)
         )
 
+    @staticmethod
+    def _extract_response_cost(response: httpx.Response) -> float:
+        """
+        Извлекает стоимость запроса из ответа LiteLLM proxy.
+
+        LiteLLM proxy при включённом трекинге расходов возвращает
+        стоимость вызова в заголовке ``x-litellm-response-cost``.
+        Для локальных моделей без настроенного прайсинга стоимость
+        будет равна 0.0.
+
+        :param response: HTTP-ответ от LiteLLM proxy.
+        :return: Стоимость вызова в USD (0.0 если данные недоступны).
+        """
+        cost_header: str | None = response.headers.get("x-litellm-response-cost")
+        if cost_header is not None:
+            try:
+                return float(cost_header)
+            except (ValueError, TypeError):
+                logger.debug(f"Failed to parse cost header: {cost_header}")
+        return 0.0
+
     async def complete(
-            self,
-            messages: list[dict[str, str]],
-            temperature: float,
-            max_tokens: int,
-            generation_name: str,
-            json_mode: bool = False,
+        self,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        generation_name: str,
+        json_mode: bool = False,
     ) -> str:
         """
         Выполняет запрос к LLM.
@@ -158,9 +218,15 @@ class LLMClient:
         :param generation_name: Имя генерации для Langfuse.
         :param json_mode: Запрос JSON-формата ответа через response_format.
         :return: Ответ модели.
-        :raises LLMClientError: При ошибке запроса.
+        :raises LLMClientError: При ошибке запроса или срабатывании circuit breaker.
         """
         client = await self._get_client()
+
+        # Проверяем circuit breaker перед выполнением запроса
+        try:
+            self._circuit_breaker.check()
+        except CircuitBreakerOpen as e:
+            raise LLMClientError(str(e)) from e
 
         payload: dict[str, Any] = {
             "model": self._model,
@@ -204,6 +270,9 @@ class LLMClient:
                 data = response.json()
                 content: str = data["choices"][0]["message"]["content"]
 
+                # Извлекаем стоимость из заголовков LiteLLM proxy
+                response_cost: float = self._extract_response_cost(response)
+
                 usage = data.get("usage")
                 usage_dict: dict[str, int] | None = None
                 if usage:
@@ -216,13 +285,18 @@ class LLMClient:
                 self._langfuse.end_generation(
                     generation=generation,
                     output=content,
+                    cost_usd=response_cost,
                     usage=usage_dict,
                     session_id=self._session_id,
                     generation_name=generation_name,
                 )
 
+                # Успешный запрос — сбрасываем circuit breaker
+                self._circuit_breaker.record_success()
+
                 logger.debug(
-                    f"LLM response received, length={len(content)}, usage={usage_dict}"
+                    f"LLM response received, length={len(content)}, "
+                    f"usage={usage_dict}, cost=${response_cost:.6f}"
                 )
                 return content
 
@@ -242,6 +316,8 @@ class LLMClient:
                         await asyncio.sleep(delay)
                     continue
 
+                # Не-retryable HTTP ошибки (4xx кроме 429) —
+                # не влияют на circuit breaker (это ошибки клиента, не сервиса)
                 self._langfuse.end_generation_with_error(
                     generation=generation,
                     error=f"HTTP error {status_code}: {response_body}",
@@ -276,6 +352,9 @@ class LLMClient:
                     error=f"Invalid response format: {e}",
                 )
                 raise LLMClientError(f"Invalid response format: {e}") from e
+
+        # Все retry исчерпаны — фиксируем сбой в circuit breaker
+        self._circuit_breaker.record_failure()
 
         error_msg: str = (
             f"Max retries ({self._max_retries}) exceeded, last error: {last_error}"
@@ -316,7 +395,7 @@ class LLMClient:
         end: int = cleaned.rfind("}")
         if start != -1 and end > start:
             try:
-                return json.loads(cleaned[start: end + 1])
+                return json.loads(cleaned[start : end + 1])
             except json.JSONDecodeError:
                 pass
 
@@ -325,11 +404,11 @@ class LLMClient:
         )
 
     async def complete_json(
-            self,
-            messages: list[dict[str, str]],
-            temperature: float,
-            max_tokens: int,
-            generation_name: str,
+        self,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        generation_name: str,
     ) -> dict[str, Any]:
         """
         Выполняет запрос к LLM с ожиданием JSON ответа.
@@ -379,6 +458,28 @@ class LLMClient:
         return self._extract_json_from_text(response)
 
 
+_shared_circuit_breaker: CircuitBreaker | None = None
+
+
+def _get_shared_circuit_breaker() -> CircuitBreaker:
+    """
+    Возвращает разделяемый экземпляр circuit breaker.
+
+    Используется всеми LLM-клиентами для отслеживания доступности
+    общего LiteLLM proxy. Singleton гарантирует, что состояние
+    circuit breaker сохраняется между сессиями.
+
+    :return: Экземпляр CircuitBreaker.
+    """
+    global _shared_circuit_breaker
+    if _shared_circuit_breaker is None:
+        _shared_circuit_breaker = CircuitBreaker(
+            failure_threshold=settings.LITELLM_CIRCUIT_BREAKER_THRESHOLD,
+            recovery_timeout=settings.LITELLM_CIRCUIT_BREAKER_RECOVERY,
+        )
+    return _shared_circuit_breaker
+
+
 def create_llm_client(model: str | None = None) -> LLMClient:
     """
     Создаёт экземпляр LLM клиента с настройками из конфигурации.
@@ -394,4 +495,6 @@ def create_llm_client(model: str | None = None) -> LLMClient:
         max_retries=settings.LITELLM_MAX_RETRIES,
         retry_backoff_base=settings.LITELLM_RETRY_BACKOFF_BASE,
         retry_backoff_max=settings.LITELLM_RETRY_BACKOFF_MAX,
+        health_check_timeout=settings.LITELLM_HEALTH_CHECK_TIMEOUT,
+        circuit_breaker=_get_shared_circuit_breaker(),
     )
