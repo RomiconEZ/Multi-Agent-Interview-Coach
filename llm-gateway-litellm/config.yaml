@@ -4,6 +4,8 @@ model_list:
       model: "lm_studio/local-llm"
       api_base: "os.environ/LOCAL_LLM_BASE_URL"
       api_key: "os.environ/LOCAL_LLM_API_KEY"
+      input_cost_per_token: "os.environ/LOCAL_LLM_INPUT_COST_PER_TOKEN"
+      output_cost_per_token: "os.environ/LOCAL_LLM_OUTPUT_COST_PER_TOKEN"
 
   - model_name: cloud/deepseek-chat
     litellm_params:
