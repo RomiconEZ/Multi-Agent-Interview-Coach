@@ -83,7 +83,7 @@ flowchart TB
     end
 
     subgraph LLM_CALL["LLM вызов"]
-        C1["LLMClient.complete()<br/>temperature=0.3, max_tokens=4000"]
+        C1["LLMClient.complete()<br/>temperature=0.3, max_tokens=4096"]
         C2["extract_json_from_llm_response()<br/>парсинг: &lt;r&gt; → &lt;result&gt; → code block → raw"]
     end
 
@@ -137,7 +137,7 @@ flowchart TB
     end
 
     subgraph LLM_CALL["LLM вызов"]
-        C1["LLMClient.complete()<br/>temperature=0.7, max_tokens=2000"]
+        C1["LLMClient.complete()<br/>temperature=0.7, max_tokens=4096"]
     end
 
     subgraph OUT["Выход Interviewer"]
@@ -176,7 +176,7 @@ flowchart TB
     end
 
     subgraph LLM_CALL["LLM вызов"]
-        C1["LLMClient.complete()<br/>temperature=0.3, max_tokens=8000"]
+        C1["LLMClient.complete()<br/>temperature=0.3, max_tokens=4096"]
         C2["extract_json_from_llm_response()"]
         C3["_parse_feedback()"]
     end
