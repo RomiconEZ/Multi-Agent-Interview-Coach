@@ -7,72 +7,86 @@
 ## Диаграмма
 
 ```mermaid
-C4Component
-    title C4 Component — Interview Core (src/app)
+flowchart TB
+    %% ── Оркестрация ──
+    session["<b>InterviewSession</b><br/>Оркестратор: lifecycle, вызов агентов,<br/>мутации состояния, адаптация сложности"]
+    state["<b>InterviewState</b><br/>In-memory: candidate, turns,<br/>difficulty, skills, gaps, streaks"]
 
-    Container_Boundary(core, "Interview Core") {
+    session <-->|"reads · mutates"| state
 
-        Component(session, "InterviewSession", "Python class", "Оркестратор сессии: lifecycle, последовательный вызов агентов, атомарные мутации состояния, адаптация сложности, интеграция с Langfuse")
+    %% ── Агенты ──
+    subgraph agents[" Агенты "]
+        direction LR
+        observer["<b>ObserverAgent</b><br/>Анализ ответа: response_type,<br/>факт-чекинг, is_gibberish"]
+        interviewer["<b>InterviewerAgent</b><br/>Генерация реплик и вопросов,<br/>обработка сценариев"]
+        evaluator["<b>EvaluatorAgent</b><br/>Финальный фидбэк: verdict,<br/>technical_review, roadmap"]
+    end
 
-        Component(state, "InterviewState", "Pydantic BaseModel", "In-memory состояние: candidate, turns, difficulty, skills, gaps, streaks")
+    base_agent["<b>BaseAgent</b> <i>ABC</i><br/>system_prompt, _build_messages(),<br/>_build_job_description_block()"]
+    prompts["<b>Agent Prompts</b><br/>OBSERVER / INTERVIEWER / EVALUATOR<br/>system prompts"]
 
-        Component(observer, "ObserverAgent", "BaseAgent subclass", "Анализ ответа кандидата: классификация response_type, факт-чекинг, is_gibberish, answered_last_question, extracted_info")
+    %% ── LLM-инфраструктура ──
+    subgraph llm[" LLM-инфраструктура "]
+        direction LR
+        llm_client["<b>LLMClient</b><br/>HTTP-клиент к LiteLLM:<br/>retry, backoff, cost extraction"]
+        circuit_breaker["<b>CircuitBreaker</b><br/>CLOSED → OPEN → HALF_OPEN<br/>threshold: 5, recovery: 60s"]
+        response_parser["<b>ResponseParser</b><br/>JSON: r-tag → result-tag →<br/>markdown → raw JSON"]
+    end
 
-        Component(interviewer, "InterviewerAgent", "BaseAgent subclass", "Генерация реплик: приветствие, вопросы, обработка сценариев (gibberish, hallucination, off-topic, question)")
+    %% ── Observability ──
+    subgraph obs[" Observability & Logging "]
+        direction LR
+        langfuse["<b>LangfuseTracker</b><br/>Traces, generations,<br/>spans, scores"]
+        metrics["<b>SessionMetrics</b><br/>TokenUsage по агентам,<br/>cost_usd, turn_count"]
+        logger["<b>InterviewLogger</b><br/>JSON-логи: interview_log<br/>и interview_detailed"]
+    end
 
-        Component(evaluator, "EvaluatorAgent", "BaseAgent subclass", "Генерация финального InterviewFeedback: verdict, technical_review, soft_skills, roadmap")
+    %% ── Конфигурация ──
+    subgraph cfg[" Конфигурация "]
+        direction LR
+        config["<b>Settings</b><br/>9 групп настроек,<br/>Pydantic Settings"]
+        schemas["<b>Schemas</b><br/>InterviewTurn, ObserverAnalysis,<br/>InterviewFeedback, enums"]
+    end
 
-        Component(base_agent, "BaseAgent", "ABC", "Абстрактный базовый класс: system_prompt, _build_messages(), _build_job_description_block()")
+    %% ── Связи: основной поток ──
+    session -->|"Stage 1: process()"| observer
+    session -->|"greeting + Stage 5: process()"| interviewer
+    session -->|"generate_feedback()"| evaluator
 
-        Component(prompts, "Agent Prompts", "Final[str] constants", "Системные промпты: observer_prompt, interviewer_prompt, evaluator_prompt. Содержат role, rules, security, output_format")
+    %% ── Связи: иерархия агентов ──
+    observer -.->|extends| base_agent
+    interviewer -.->|extends| base_agent
+    evaluator -.->|extends| base_agent
+    base_agent -.->|"system_prompt"| prompts
 
-        Component(llm_client, "LLMClient", "Python class", "HTTP-клиент к LiteLLM: complete(), complete_json(), retry с exponential backoff, Langfuse generation tracking, cost extraction")
+    %% ── Связи: LLM вызовы ──
+    session -.->|"health · set_trace · close"| llm_client
+    base_agent -->|"provides _llm_client"| llm_client
+    llm_client -->|"check · record"| circuit_breaker
+    observer & evaluator -->|"extract_json()"| response_parser
 
-        Component(circuit_breaker, "CircuitBreaker", "Python class", "Паттерн Circuit Breaker: CLOSED → OPEN → HALF_OPEN. Порог: 5 сбоев, recovery: 60s")
+    %% ── Связи: observability ──
+    session -->|"save_session · save_raw_log"| logger
+    session -->|"trace · spans · scores"| langfuse
+    llm_client -->|"generation tracking"| langfuse
+    langfuse -->|"add_generation · increment_turn"| metrics
 
-        Component(response_parser, "ResponseParser", "Module functions", "Многоуровневый парсер JSON из LLM: <r> → <result> → markdown code block → raw {...}. extract_reasoning()")
+    %% ── Связи: конфигурация ──
+    session -.->|"settings"| config
+    session -.->|"models"| schemas
 
-        Component(interview_logger, "InterviewLogger", "Python class", "Сохранение JSON-логов: interview_log (формат ТЗ) и interview_detailed (полный dump с token_metrics)")
+    %% ── Стили ──
+    classDef orch fill:#4A90D9,stroke:#2C5F8A,color:#fff
+    classDef agent fill:#7B68EE,stroke:#5A4DB0,color:#fff
+    classDef llmStyle fill:#E67E22,stroke:#BA6418,color:#fff
+    classDef obsStyle fill:#27AE60,stroke:#1E8449,color:#fff
+    classDef cfgStyle fill:#95A5A6,stroke:#707B7C,color:#fff
 
-        Component(langfuse_tracker, "LangfuseTracker", "Singleton", "Фасад над Langfuse SDK: create_trace, create_generation, add_span, score_trace, SessionMetrics")
-
-        Component(session_metrics, "SessionMetrics", "Dataclass", "Агрегатор метрик: TokenUsage по агентам, turn_count, generation_count, cost_usd")
-
-        Component(config, "Settings", "Pydantic Settings", "9 групп: App, Redis, Log, LiteLLM, Interview, Langfuse, GradioUI. Валидация, computed fields.")
-
-        Component(schemas, "Schemas", "Pydantic Models", "InterviewTurn, ObserverAnalysis, InterviewFeedback, CandidateInfo, InterviewConfig, AgentSettings, enums")
-    }
-
-    Rel(session, observer, "Stage 1: process(state, user_message, last_question)")
-    Rel(session, interviewer, "Stage 5: process(state, analysis, user_message)")
-    Rel(session, evaluator, "generate_feedback: process(state)")
-    Rel(session, state, "Reads/mutates: turns, difficulty, skills, gaps")
-    Rel(session, interview_logger, "save_session(), save_raw_log()")
-    Rel(session, langfuse_tracker, "create_trace, add_span, score_trace, add_session_metrics_to_trace")
-
-    Rel(observer, base_agent, "extends")
-    Rel(interviewer, base_agent, "extends")
-    Rel(evaluator, base_agent, "extends")
-
-    Rel(observer, prompts, "OBSERVER_SYSTEM_PROMPT")
-    Rel(interviewer, prompts, "INTERVIEWER_SYSTEM_PROMPT")
-    Rel(evaluator, prompts, "EVALUATOR_SYSTEM_PROMPT")
-
-    Rel(base_agent, llm_client, "complete() / complete_json()")
-
-    Rel(observer, response_parser, "extract_json_from_llm_response()")
-    Rel(evaluator, response_parser, "extract_json_from_llm_response()")
-
-    Rel(llm_client, circuit_breaker, "check(), record_success(), record_failure()")
-    Rel(llm_client, langfuse_tracker, "create_generation(), end_generation()")
-    Rel(llm_client, session_metrics, "Обновляет через end_generation(usage, cost)")
-
-    Rel(session, config, "settings.MAX_TURNS, HISTORY_WINDOW_TURNS, etc.")
-    Rel(session, schemas, "InterviewState, InterviewTurn, ObserverAnalysis, InterviewFeedback")
-
-    UpdateRelStyle(session, observer, $offsetX="-80", $offsetY="-10")
-    UpdateRelStyle(session, interviewer, $offsetX="10", $offsetY="-10")
-    UpdateRelStyle(session, evaluator, $offsetX="90", $offsetY="-10")
+    class session,state orch
+    class observer,interviewer,evaluator,base_agent,prompts agent
+    class llm_client,circuit_breaker,response_parser llmStyle
+    class langfuse,metrics,logger obsStyle
+    class config,schemas cfgStyle
 ```
 
 ---
