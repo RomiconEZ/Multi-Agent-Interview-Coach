@@ -25,13 +25,15 @@ from .circuit_breaker import CircuitBreaker, CircuitBreakerOpen
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
-_RETRYABLE_HTTP_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
+_RATE_LIMIT_CODE: int = 429
+_SERVER_ERROR_CODES: frozenset[int] = frozenset({500, 502, 503, 504})
+_RETRYABLE_HTTP_CODES: frozenset[int] = (
+    frozenset({_RATE_LIMIT_CODE}) | _SERVER_ERROR_CODES
+)
 
 
 class LLMClientError(Exception):
     """Ошибка клиента LLM."""
-
-    pass
 
 
 class LLMClient:
@@ -50,7 +52,7 @@ class LLMClient:
         self,
         base_url: str,
         model: str,
-        api_key: str,
+        api_key: str | None,
         timeout: int,
         max_retries: int,
         retry_backoff_base: float,
@@ -62,7 +64,7 @@ class LLMClient:
     ) -> None:
         self._base_url = base_url
         self._model = model
-        self._api_key = api_key
+        self._api_key: str | None = api_key
         self._timeout = timeout
         self._max_retries = max_retries
         self._retry_backoff_base = retry_backoff_base
@@ -104,7 +106,7 @@ class LLMClient:
         :raises LLMClientError: Если API ключ не задан.
         """
         if self._client is None or self._client.is_closed:
-            if not self._api_key:
+            if self._api_key is None:
                 raise LLMClientError(
                     "LITELLM_API_KEY is not set. Please set it in .env file."
                 )
@@ -133,6 +135,7 @@ class LLMClient:
 
         :return: True если API доступен, False иначе.
         """
+        alert_mgr = get_alert_manager()
         try:
             client: httpx.AsyncClient = await self._get_client()
             response: httpx.Response = await client.get(
@@ -146,7 +149,6 @@ class LLMClient:
                 logger.warning(
                     f"LLM API readiness check failed: status={response.status_code}"
                 )
-                alert_mgr = get_alert_manager()
                 await alert_mgr.fire_warning(
                     source="LLMClient.check_health",
                     message=f"LLM API readiness check failed: status={response.status_code}",
@@ -157,7 +159,6 @@ class LLMClient:
             logger.warning(
                 f"LLM API readiness check timed out after {self._health_check_timeout}s"
             )
-            alert_mgr = get_alert_manager()
             await alert_mgr.fire_warning(
                 source="LLMClient.check_health",
                 message=f"LLM API readiness check timed out after {self._health_check_timeout}s",
@@ -166,7 +167,6 @@ class LLMClient:
             return False
         except httpx.RequestError as e:
             logger.warning(f"LLM API readiness check failed: {e}")
-            alert_mgr = get_alert_manager()
             await alert_mgr.fire_warning(
                 source="LLMClient.check_health",
                 message=f"LLM API readiness check request error: {e}",
@@ -175,11 +175,14 @@ class LLMClient:
             return False
 
     async def close(self) -> None:
-        """Закрывает HTTP клиент и кэш."""
+        """Закрывает HTTP-клиент.
+
+        Кэш (shared singleton) не закрывается — его lifecycle
+        управляется на уровне приложения через ``close_shared_llm_cache``.
+        """
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
-        await self._cache.close()
 
     def _compute_retry_delay(self, attempt: int) -> float:
         """
@@ -264,32 +267,34 @@ class LLMClient:
                 f"LLM cache hit for {generation_name}, "
                 f"model={self._model}, key={cache_key[:16]}..."
             )
-            generation = self._langfuse.create_generation(
-                trace=self._current_trace,
-                name=generation_name,
-                model=self._model,
-                input_messages=messages,
-                metadata={
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "json_mode": json_mode,
-                    "cached": True,
-                },
-            )
-            self._langfuse.end_generation(
-                generation=generation,
-                output=cached_response,
-                cost_usd=0.0,
-                usage={"input": 0, "output": 0, "total": 0},
-                session_id=self._session_id,
-                generation_name=generation_name,
-            )
+            try:
+                generation = self._langfuse.create_generation(
+                    trace=self._current_trace,
+                    name=generation_name,
+                    model=self._model,
+                    input_messages=messages,
+                    metadata={
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "json_mode": json_mode,
+                        "cached": True,
+                    },
+                )
+                self._langfuse.end_generation(
+                    generation=generation,
+                    output=cached_response,
+                    cost_usd=0.0,
+                    usage={"input": 0, "output": 0, "total": 0},
+                    session_id=self._session_id,
+                    generation_name=generation_name,
+                )
+            except Exception as exc:
+                logger.warning(f"Langfuse tracking failed for cached response: {exc}")
             return cached_response
 
         # ── Обычный LLM-вызов ────────────────────────────────────────────
-        client = await self._get_client()
 
-        # Проверяем circuit breaker перед выполнением запроса
+        # Проверяем circuit breaker до создания HTTP-клиента
         try:
             self._circuit_breaker.check()
         except CircuitBreakerOpen as e:
@@ -300,6 +305,8 @@ class LLMClient:
                 metadata={"model": self._model, "generation": generation_name},
             )
             raise LLMClientError(str(e)) from e
+
+        client = await self._get_client()
 
         payload: dict[str, Any] = {
             "model": self._model,
@@ -373,11 +380,14 @@ class LLMClient:
                 )
 
                 # ── Сохранение в кэш ─────────────────────────────────────
-                await self._cache.set(
-                    cache_key,
-                    content,
-                    self._cache_ttl_seconds,
-                )
+                try:
+                    await self._cache.set(
+                        cache_key,
+                        content,
+                        self._cache_ttl_seconds,
+                    )
+                except Exception as exc:
+                    logger.warning(f"LLM cache write failed: {exc}")
 
                 return content
 
@@ -434,8 +444,16 @@ class LLMClient:
                 )
                 raise LLMClientError(f"Invalid response format: {e}") from e
 
-        # Все retry исчерпаны — фиксируем сбой в circuit breaker
-        self._circuit_breaker.record_failure()
+        # Все retry исчерпаны
+        # Фиксируем сбой в circuit breaker только для серверных ошибок,
+        # а не для rate limiting (429), т.к. 429 — штатный механизм
+        # ограничения нагрузки, а не признак недоступности сервиса
+        is_server_error: bool = (
+            isinstance(last_error, httpx.HTTPStatusError)
+            and last_error.response.status_code in _SERVER_ERROR_CODES
+        ) or isinstance(last_error, (httpx.TimeoutException, httpx.RequestError))
+        if is_server_error:
+            self._circuit_breaker.record_failure()
 
         error_msg: str = (
             f"Max retries ({self._max_retries}) exceeded, last error: {last_error}"
@@ -594,6 +612,19 @@ def _get_shared_cache() -> LLMCacheBackend:
             redis_url=settings.REDIS_CACHE_URL,
         )
     return _shared_cache
+
+
+async def close_shared_llm_cache() -> None:
+    """
+    Закрывает разделяемый кэш LLM-ответов.
+
+    Вызывается при завершении работы приложения для освобождения
+    Redis-соединения. Безопасно вызывать повторно.
+    """
+    global _shared_cache
+    if _shared_cache is not None:
+        await _shared_cache.close()
+        _shared_cache = None
 
 
 def create_llm_client(model: str | None = None) -> LLMClient:

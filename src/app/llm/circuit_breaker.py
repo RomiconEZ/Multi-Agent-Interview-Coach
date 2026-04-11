@@ -39,8 +39,6 @@ class CircuitState(str, Enum):
 class CircuitBreakerOpen(Exception):
     """Исключение: circuit breaker в открытом состоянии, запрос отклонён."""
 
-    pass
-
 
 class CircuitBreaker:
     """
@@ -120,9 +118,15 @@ class CircuitBreaker:
         """
         Асинхронно отправляет CRITICAL-алерт о переходе circuit breaker в OPEN.
 
-        Использует ``asyncio.get_event_loop().create_task`` для неблокирующей
+        Использует ``asyncio.get_running_loop().create_task`` для неблокирующей
         отправки. Если event loop недоступен, алерт пропускается (ошибка логируется).
+        Значения снимаются в snapshot до создания корутины, чтобы избежать
+        гонки с последующими мутациями состояния.
         """
+        failure_count: int = self._failure_count
+        failure_threshold: int = self._failure_threshold
+        recovery_timeout: float = self._recovery_timeout
+
         try:
             from ..observability.alerts import get_alert_manager
 
@@ -133,21 +137,20 @@ class CircuitBreaker:
                     source="CircuitBreaker",
                     message=(
                         f"Circuit breaker transitioned to OPEN after "
-                        f"{self._failure_count} consecutive failures "
-                        f"(threshold={self._failure_threshold}, "
-                        f"recovery={self._recovery_timeout}s)"
+                        f"{failure_count} consecutive failures "
+                        f"(threshold={failure_threshold}, "
+                        f"recovery={recovery_timeout}s)"
                     ),
                     metadata={
-                        "failure_count": self._failure_count,
-                        "failure_threshold": self._failure_threshold,
-                        "recovery_timeout": self._recovery_timeout,
+                        "failure_count": failure_count,
+                        "failure_threshold": failure_threshold,
+                        "recovery_timeout": recovery_timeout,
                     },
                 )
 
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                _ = loop.create_task(_send())
-            else:
-                logger.debug("Event loop not running, skipping circuit breaker alert")
+            loop = asyncio.get_running_loop()
+            _ = loop.create_task(_send())
+        except RuntimeError:
+            logger.debug("No running event loop, skipping circuit breaker alert")
         except Exception as exc:
-            logger.debug(f"Failed to fire circuit breaker alert: {exc}")
+            logger.warning(f"Failed to fire circuit breaker alert: {exc}")

@@ -8,9 +8,23 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Final
 
-from .config import settings
+_app_timezone: timezone | None = None
 
-APP_TIMEZONE: Final[timezone] = timezone(timedelta(hours=settings.APP_TZ_OFFSET))
+
+def _get_app_timezone() -> timezone:
+    """
+    Возвращает timezone приложения (lazy initialization).
+
+    Вычисляется при первом вызове на основе настроек.
+
+    :return: Timezone приложения.
+    """
+    global _app_timezone
+    if _app_timezone is None:
+        from .config import get_settings
+
+        _app_timezone = timezone(timedelta(hours=get_settings().APP_TZ_OFFSET))
+    return _app_timezone
 
 
 class TZFormatter(logging.Formatter):
@@ -22,7 +36,7 @@ class TZFormatter(logging.Formatter):
     """
 
     def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
-        dt = datetime.fromtimestamp(record.created, APP_TIMEZONE)
+        dt = datetime.fromtimestamp(record.created, _get_app_timezone())
         return dt.strftime(datefmt) if datefmt else dt.isoformat(timespec="seconds")
 
 
@@ -147,6 +161,10 @@ def setup_logging(force_reconfigure: bool = False) -> None:
     :param force_reconfigure: Принудительно переконфигурировать логгер,
         даже если обработчики уже настроены.
     """
+    from .config import get_settings
+
+    _settings = get_settings()
+
     root_logger = logging.getLogger()
 
     if root_logger.handlers and not force_reconfigure:
@@ -156,20 +174,20 @@ def setup_logging(force_reconfigure: bool = False) -> None:
     root_logger.setLevel(logging.DEBUG)
 
     system_handler = _create_file_handler(
-        path=settings.SYSTEM_LOG_PATH,
+        path=_settings.SYSTEM_LOG_PATH,
         level=logging.DEBUG,
         log_format=SYSTEM_LOG_FORMAT,
         log_filter=SystemLogFilter(),
-        max_bytes=settings.LOG_MAX_BYTES,
-        backup_count=settings.LOG_BACKUP_COUNT,
+        max_bytes=_settings.LOG_MAX_BYTES,
+        backup_count=_settings.LOG_BACKUP_COUNT,
     )
     personal_handler = _create_file_handler(
-        path=settings.PERSONAL_LOG_PATH,
+        path=_settings.PERSONAL_LOG_PATH,
         level=logging.DEBUG,
         log_format=PERSONAL_LOG_FORMAT,
         log_filter=PersonalLogFilter(),
-        max_bytes=settings.LOG_MAX_BYTES,
-        backup_count=settings.LOG_BACKUP_COUNT,
+        max_bytes=_settings.LOG_MAX_BYTES,
+        backup_count=_settings.LOG_BACKUP_COUNT,
     )
 
     console_handler = logging.StreamHandler()

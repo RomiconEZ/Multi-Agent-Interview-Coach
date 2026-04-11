@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from pydantic import Field, computed_field, field_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..schemas.EnvironmentOption import EnvironmentOption
 
 
 class _SettingsBase(BaseSettings):
-    """Common settings configuration."""
+    """Базовый класс конфигурации приложения."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -21,6 +23,8 @@ class _SettingsBase(BaseSettings):
 
 
 class AppSettings(_SettingsBase):
+    """Общие настройки приложения."""
+
     APP_NAME: str = "FastAPI app"
     APP_DESCRIPTION: str | None = None
     APP_VERSION: str | None = None
@@ -30,10 +34,14 @@ class AppSettings(_SettingsBase):
 
 
 class EnvironmentSettings(_SettingsBase):
+    """Настройки окружения."""
+
     ENVIRONMENT: EnvironmentOption = Field(default=EnvironmentOption.LOCAL)
 
 
 class RedisCacheSettings(_SettingsBase):
+    """Настройки подключения к Redis для кэширования."""
+
     REDIS_CACHE_HOST: str = "localhost"
     REDIS_CACHE_PORT: int = 6379
 
@@ -58,6 +66,8 @@ class RedisCacheSettings(_SettingsBase):
 
 
 class ClientSideCacheSettings(_SettingsBase):
+    """Настройки клиентского кэширования (HTTP-заголовки)."""
+
     CLIENT_CACHE_MAX_AGE: int = 60
 
     @field_validator("CLIENT_CACHE_MAX_AGE")
@@ -92,10 +102,8 @@ class LogSettings(_SettingsBase):
 
     @field_validator("APP_LOG_DIR")
     @classmethod
-    def _resolve_and_create_log_dir(cls, v: Path) -> Path:
-        resolved = v.resolve()
-        resolved.mkdir(parents=True, exist_ok=True)
-        return resolved
+    def _resolve_log_dir(cls, v: Path) -> Path:
+        return v.resolve()
 
     @field_validator("LOG_MAX_BYTES")
     @classmethod
@@ -129,7 +137,7 @@ class LiteLLMSettings(_SettingsBase):
     Настройки для подключения к LiteLLM.
 
     :ivar LITELLM_BASE_URL: Базовый URL LiteLLM API.
-    :ivar LITELLM_API_KEY: API ключ для аутентификации (опционально).
+    :ivar LITELLM_API_KEY: API ключ для аутентификации (None — не задан).
     :ivar LITELLM_MODEL: Имя модели по умолчанию.
     :ivar LITELLM_TIMEOUT: Таймаут запросов в секундах.
     :ivar LITELLM_MAX_RETRIES: Максимальное количество повторных попыток.
@@ -139,7 +147,7 @@ class LiteLLMSettings(_SettingsBase):
     """
 
     LITELLM_BASE_URL: str = "http://localhost:4000"
-    LITELLM_API_KEY: str = ""
+    LITELLM_API_KEY: str | None = None
     LITELLM_MODEL: str = "local_llm"
     LITELLM_TIMEOUT: int = 120
     LITELLM_MAX_RETRIES: int = 3
@@ -241,10 +249,8 @@ class InterviewSettings(_SettingsBase):
 
     @field_validator("INTERVIEW_LOG_DIR")
     @classmethod
-    def _resolve_and_create_interview_log_dir(cls, v: Path) -> Path:
-        resolved = v.resolve()
-        resolved.mkdir(parents=True, exist_ok=True)
-        return resolved
+    def _resolve_interview_log_dir(cls, v: Path) -> Path:
+        return v.resolve()
 
     @field_validator("MAX_TURNS")
     @classmethod
@@ -275,14 +281,14 @@ class LangfuseSettings(_SettingsBase):
     Настройки для Langfuse observability (self-hosted / локальный).
 
     :ivar LANGFUSE_ENABLED: Включить/выключить Langfuse трекинг.
-    :ivar LANGFUSE_PUBLIC_KEY: Публичный ключ Langfuse.
-    :ivar LANGFUSE_SECRET_KEY: Секретный ключ Langfuse.
+    :ivar LANGFUSE_PUBLIC_KEY: Публичный ключ Langfuse (None — не задан).
+    :ivar LANGFUSE_SECRET_KEY: Секретный ключ Langfuse (None — не задан).
     :ivar LANGFUSE_HOST: URL хоста Langfuse (локальный по умолчанию).
     """
 
     LANGFUSE_ENABLED: bool = True
-    LANGFUSE_PUBLIC_KEY: str = ""
-    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_PUBLIC_KEY: str | None = None
+    LANGFUSE_SECRET_KEY: str | None = None
     LANGFUSE_HOST: str = "http://localhost:3000"
 
     @field_validator("LANGFUSE_HOST")
@@ -302,13 +308,14 @@ class LLMCacheSettings(_SettingsBase):
     LLM_CACHE_ENABLED: bool = False
     LLM_CACHE_TTL_SECONDS: int = 3600
 
-    @field_validator("LLM_CACHE_TTL_SECONDS")
-    @classmethod
-    def _ttl_positive(cls, v: int) -> int:
-        """Проверяет, что TTL кэша положителен."""
-        if v < 1:
-            raise ValueError("LLM_CACHE_TTL_SECONDS must be >= 1")
-        return v
+    @model_validator(mode="after")
+    def _validate_ttl_when_enabled(self) -> LLMCacheSettings:
+        """Проверяет, что TTL кэша положителен, если кэширование включено."""
+        if self.LLM_CACHE_ENABLED and self.LLM_CACHE_TTL_SECONDS < 1:
+            raise ValueError(
+                "LLM_CACHE_TTL_SECONDS must be >= 1 when LLM_CACHE_ENABLED is True"
+            )
+        return self
 
 
 class AlertSettings(_SettingsBase):
@@ -472,6 +479,27 @@ class GradioUISettings(_SettingsBase):
             raise ValueError("UI_MAX_TURNS_STEP must be >= 1")
         return v
 
+    @model_validator(mode="after")
+    def _validate_slider_ranges(self) -> GradioUISettings:
+        """Проверяет, что минимальные значения слайдеров меньше максимальных."""
+        if self.UI_TOKENS_MIN >= self.UI_TOKENS_MAX:
+            raise ValueError(
+                f"UI_TOKENS_MIN ({self.UI_TOKENS_MIN}) must be < UI_TOKENS_MAX ({self.UI_TOKENS_MAX})"
+            )
+        if self.UI_EVAL_TOKENS_MIN >= self.UI_EVAL_TOKENS_MAX:
+            raise ValueError(
+                f"UI_EVAL_TOKENS_MIN ({self.UI_EVAL_TOKENS_MIN}) must be < UI_EVAL_TOKENS_MAX ({self.UI_EVAL_TOKENS_MAX})"
+            )
+        if self.UI_MAX_TURNS_MIN >= self.UI_MAX_TURNS_MAX:
+            raise ValueError(
+                f"UI_MAX_TURNS_MIN ({self.UI_MAX_TURNS_MIN}) must be < UI_MAX_TURNS_MAX ({self.UI_MAX_TURNS_MAX})"
+            )
+        if self.UI_TEMPERATURE_MIN >= self.UI_TEMPERATURE_MAX:
+            raise ValueError(
+                f"UI_TEMPERATURE_MIN ({self.UI_TEMPERATURE_MIN}) must be < UI_TEMPERATURE_MAX ({self.UI_TEMPERATURE_MAX})"
+            )
+        return self
+
 
 class Settings(
     AppSettings,
@@ -486,7 +514,48 @@ class Settings(
     AlertSettings,
     GradioUISettings,
 ):
-    pass
+    """Итоговые настройки приложения, собранные из всех тематических классов."""
+
+    def ensure_directories(self) -> None:
+        """Создаёт необходимые директории файловой системы."""
+        self.APP_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        self.INTERVIEW_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-settings = Settings()
+_settings_lock: threading.Lock = threading.Lock()
+_settings_instance: Settings | None = None
+
+
+def get_settings() -> Settings:
+    """
+    Возвращает singleton экземпляр настроек приложения.
+
+    Lazy initialization: экземпляр создаётся при первом вызове.
+    Потокобезопасен.
+
+    :return: Экземпляр Settings.
+    """
+    global _settings_instance
+    if _settings_instance is not None:
+        return _settings_instance
+    with _settings_lock:
+        if _settings_instance is None:
+            _settings_instance = Settings()
+    return _settings_instance
+
+
+def reset_settings() -> None:
+    """Сбрасывает singleton настроек (используется в тестах)."""
+    global _settings_instance
+    with _settings_lock:
+        _settings_instance = None
+
+
+if TYPE_CHECKING:
+    settings: Settings
+
+
+def __getattr__(name: str) -> object:
+    if name == "settings":
+        return get_settings()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

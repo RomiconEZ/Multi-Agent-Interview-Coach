@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from typing import Final
 
-MAIN_CSS: Final[str] = """
+MAIN_CSS: Final[
+    str
+] = """
 /* ===================================================================
    Multi-Agent Interview Coach — Main Stylesheet (v2 clean)
    =================================================================== */
@@ -629,7 +631,9 @@ footer {
 }
 """
 
-HEADER_HTML: Final[str] = """
+HEADER_HTML: Final[
+    str
+] = """
 <div class="app-header">
     <h1>Multi-Agent Interview Coach</h1>
     <p>Интеллектуальная система подготовки к техническим интервью с AI-агентами</p>

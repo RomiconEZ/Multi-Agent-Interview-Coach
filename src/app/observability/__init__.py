@@ -1,5 +1,5 @@
 """
-Модуль observability для трекинга LLM вызовов через Langfuse.
+Модуль observability: трекинг LLM-вызовов через Langfuse и алертинг.
 """
 
 from .alerts import (
@@ -9,6 +9,7 @@ from .alerts import (
     AlertSeverity,
     LogAlertChannel,
     WebhookAlertChannel,
+    close_alert_manager,
     configure_alert_manager,
     get_alert_manager,
 )
@@ -24,12 +25,13 @@ __all__ = [
     "AlertChannel",
     "AlertManager",
     "AlertSeverity",
-    "LogAlertChannel",
-    "WebhookAlertChannel",
-    "configure_alert_manager",
-    "get_alert_manager",
     "LangfuseTracker",
+    "LogAlertChannel",
     "SessionMetrics",
     "TokenUsage",
+    "WebhookAlertChannel",
+    "close_alert_manager",
+    "configure_alert_manager",
+    "get_alert_manager",
     "get_langfuse_tracker",
 ]

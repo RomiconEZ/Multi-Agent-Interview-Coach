@@ -7,9 +7,8 @@
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, patch
-
-import pytest
 
 from src.app.llm.cache import (
     NullLLMCache,
@@ -181,18 +180,19 @@ class TestRedisLLMCache:
         result = await cache.set("key", "value", 60)
         assert result is None
 
-    async def test_connection_failed_flag_prevents_retries(self) -> None:
-        """После сбоя подключения повторные попытки не выполняются."""
+    async def test_recent_connection_failure_prevents_retries(self) -> None:
+        """После недавнего сбоя подключения повторные попытки не выполняются."""
         cache = RedisLLMCache(redis_url="redis://localhost:6379")
-        cache._connection_failed = True
+        # Имитируем недавний сбой подключения
+        cache._last_connection_failure = time.monotonic()
 
         result: str | None = await cache.get("key")
         assert result is None
 
-    async def test_ensure_client_sets_connection_failed_on_error(self) -> None:
-        """``_ensure_client`` устанавливает ``_connection_failed`` при ошибке подключения."""
+    async def test_ensure_client_records_failure_time_on_error(self) -> None:
+        """``_ensure_client`` записывает время сбоя при ошибке подключения."""
         cache = RedisLLMCache(redis_url="redis://bad-host:6379")
-        assert cache._connection_failed is False
+        assert cache._last_connection_failure == 0.0
 
         with patch(
             "src.app.llm.cache.aioredis.from_url",
@@ -201,19 +201,20 @@ class TestRedisLLMCache:
             client = await cache._ensure_client()
 
         assert client is None
-        assert cache._connection_failed is True
+        assert cache._last_connection_failure > 0.0
         assert cache._client is None
 
-        # Повторный вызов сразу возвращает None без попытки подключения
+        # Повторный вызов сразу возвращает None (интервал retry не прошёл)
         client_again = await cache._ensure_client()
         assert client_again is None
 
-    async def test_ensure_client_sets_failed_on_ping_error(self) -> None:
-        """``_ensure_client`` устанавливает ``_connection_failed`` при ошибке ping."""
+    async def test_ensure_client_records_failure_on_ping_error(self) -> None:
+        """``_ensure_client`` записывает время сбоя при ошибке ping и закрывает клиент."""
         cache = RedisLLMCache(redis_url="redis://localhost:6379")
 
         mock_redis = AsyncMock()
         mock_redis.ping = AsyncMock(side_effect=ConnectionError("ping failed"))
+        mock_redis.aclose = AsyncMock()
 
         with patch(
             "src.app.llm.cache.aioredis.from_url",
@@ -222,7 +223,29 @@ class TestRedisLLMCache:
             client = await cache._ensure_client()
 
         assert client is None
-        assert cache._connection_failed is True
+        assert cache._last_connection_failure > 0.0
+        # Проверяем, что созданный клиент был закрыт при ошибке ping
+        mock_redis.aclose.assert_awaited_once()
+
+    async def test_connection_retry_after_interval(self) -> None:
+        """После истечения интервала retry повторная попытка подключения выполняется."""
+        cache = RedisLLMCache(redis_url="redis://localhost:6379")
+        # Имитируем сбой, произошедший давно (больше _CONNECTION_RETRY_INTERVAL назад)
+        cache._last_connection_failure = time.monotonic() - 60.0
+
+        mock_redis = AsyncMock()
+        mock_redis.ping = AsyncMock(side_effect=ConnectionError("still down"))
+        mock_redis.aclose = AsyncMock()
+
+        with patch(
+            "src.app.llm.cache.aioredis.from_url",
+            return_value=mock_redis,
+        ):
+            client = await cache._ensure_client()
+
+        # Попытка подключения была выполнена (from_url вызван)
+        assert client is None
+        mock_redis.ping.assert_awaited_once()
 
     async def test_close_calls_aclose(self) -> None:
         """``close`` вызывает ``aclose`` на клиенте Redis."""

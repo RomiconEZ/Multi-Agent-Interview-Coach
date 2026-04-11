@@ -12,7 +12,7 @@ from .cache import (
     compute_cache_key,
     create_llm_cache,
 )
-from .client import LLMClient, LLMClientError, create_llm_client
+from .client import LLMClient, LLMClientError, close_shared_llm_cache, create_llm_client
 from .models import (
     fetch_available_models,
     fetch_available_models_sync,
@@ -29,6 +29,7 @@ __all__ = [
     "LLMClientError",
     "NullLLMCache",
     "RedisLLMCache",
+    "close_shared_llm_cache",
     "compute_cache_key",
     "create_llm_cache",
     "create_llm_client",

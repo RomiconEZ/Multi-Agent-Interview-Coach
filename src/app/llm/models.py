@@ -21,9 +21,9 @@ _MODELS_ENDPOINT: str = "/v1/models"
 
 
 async def fetch_available_models(
-        base_url: str,
-        api_key: str,
-        timeout: float,
+    base_url: str,
+    api_key: str | None,
+    timeout: float,
 ) -> list[str]:
     """
     Запрашивает список доступных моделей у LiteLLM API.
@@ -32,7 +32,7 @@ async def fetch_available_models(
     отсортированный список идентификаторов моделей.
 
     :param base_url: Базовый URL LiteLLM API.
-    :param api_key: API-ключ для авторизации.
+    :param api_key: API-ключ для авторизации (None — без авторизации).
     :param timeout: Таймаут запроса в секундах.
     :return: Отсортированный список имён моделей.
     """
@@ -43,9 +43,7 @@ async def fetch_available_models(
     url: str = f"{base_url.rstrip('/')}{_MODELS_ENDPOINT}"
 
     try:
-        async with httpx.AsyncClient(
-                timeout=httpx.Timeout(timeout)
-        ) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
             response: httpx.Response = await client.get(url, headers=headers)
             response.raise_for_status()
 
@@ -77,15 +75,15 @@ async def fetch_available_models(
 
 
 def fetch_available_models_sync(
-        base_url: str,
-        api_key: str,
-        timeout: float,
+    base_url: str,
+    api_key: str | None,
+    timeout: float,
 ) -> list[str]:
     """
     Синхронная версия получения списка моделей из LiteLLM API.
 
     :param base_url: Базовый URL LiteLLM API.
-    :param api_key: API-ключ для авторизации.
+    :param api_key: API-ключ для авторизации (None — без авторизации).
     :param timeout: Таймаут запроса в секундах.
     :return: Отсортированный список имён моделей.
     """

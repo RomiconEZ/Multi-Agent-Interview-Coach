@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from typing import Final
 
-OBSERVER_SYSTEM_PROMPT: Final[str] = """\
+OBSERVER_SYSTEM_PROMPT: Final[
+    str
+] = """\
 <role>
 Ты — Observer Agent (Агент-Наблюдатель) в мультиагентной системе технического интервью.
 

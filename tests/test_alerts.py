@@ -8,12 +8,14 @@ AlertManager, фабрику configure_alert_manager, get_alert_manager.
 from __future__ import annotations
 
 import logging
+
 from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+
 from pydantic import ValidationError
 
 from src.app.observability.alerts import (
@@ -139,9 +141,7 @@ class TestLogAlertChannel:
 
         assert any("INFO" in record.message for record in caplog.records)
 
-    async def test_send_includes_metadata(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    async def test_send_includes_metadata(self, caplog: pytest.LogCaptureFixture) -> None:
         """Метаданные включаются в лог-сообщение."""
         channel = LogAlertChannel()
         alert = Alert(
@@ -228,9 +228,7 @@ class TestWebhookAlertChannel:
         )
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.post = AsyncMock(
-            side_effect=httpx.RequestError("connection refused")
-        )
+        mock_client.post = AsyncMock(side_effect=httpx.RequestError("connection refused"))
         mock_client.is_closed = False
         channel._client = mock_client
 
@@ -251,9 +249,7 @@ class TestWebhookAlertChannel:
         )
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.post = AsyncMock(
-            side_effect=httpx.TimeoutException("read timed out")
-        )
+        mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("read timed out"))
         mock_client.is_closed = False
         channel._client = mock_client
 

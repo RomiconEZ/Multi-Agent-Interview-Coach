@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
 import gradio as gr
 
-from .styles import HEADER_HTML, MAIN_CSS
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger, setup_logging
 from ..interview import InterviewSession, create_interview_session
@@ -26,6 +26,7 @@ from ..schemas.agent_settings import (
     InterviewConfig,
     SingleAgentConfig,
 )
+from .styles import HEADER_HTML, MAIN_CSS
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -61,15 +62,15 @@ def _run_async(coro: Any) -> Any:
 
 
 def _build_interview_config(
-        model: str,
-        max_turns: int,
-        job_description: str,
-        obs_temp: float,
-        obs_tokens: int,
-        int_temp: float,
-        int_tokens: int,
-        eval_temp: float,
-        eval_tokens: int,
+    model: str,
+    max_turns: int,
+    job_description: str,
+    obs_temp: float,
+    obs_tokens: int,
+    int_temp: float,
+    int_tokens: int,
+    eval_temp: float,
+    eval_tokens: int,
 ) -> InterviewConfig:
     """
     Собирает конфигурацию интервью из параметров UI.
@@ -130,8 +131,8 @@ def _disable_input_controls() -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def _append_assistant_message(
-        history: list[dict[str, str | None]],
-        content: str,
+    history: list[dict[str, str | None]],
+    content: str,
 ) -> list[dict[str, str | None]]:
     """
     Добавляет сообщение ассистента в историю чата.
@@ -146,15 +147,15 @@ def _append_assistant_message(
 
 
 async def _start_interview_async(
-        model: str,
-        max_turns: int,
-        job_description: str,
-        obs_temp: float,
-        obs_tokens: int,
-        int_temp: float,
-        int_tokens: int,
-        eval_temp: float,
-        eval_tokens: int,
+    model: str,
+    max_turns: int,
+    job_description: str,
+    obs_temp: float,
+    obs_tokens: int,
+    int_temp: float,
+    int_tokens: int,
+    eval_temp: float,
+    eval_tokens: int,
 ) -> tuple[
     str,
     dict[str, Any],
@@ -221,15 +222,17 @@ async def _start_interview_async(
     )
 
 
-def start_interview_prepare() -> tuple[
-    str,
-    dict[str, Any],
-    list[dict[str, str | None]],
-    str,
-    None,
-    None,
-    dict[str, Any],
-]:
+def start_interview_prepare() -> (
+    tuple[
+        str,
+        dict[str, Any],
+        list[dict[str, str | None]],
+        str,
+        None,
+        None,
+        dict[str, Any],
+    ]
+):
     """
     Мгновенно обновляет UI при нажатии «Начать интервью».
 
@@ -250,15 +253,15 @@ def start_interview_prepare() -> tuple[
 
 
 def start_interview(
-        model: str,
-        max_turns: int,
-        job_description: str,
-        obs_temp: float,
-        obs_tokens: int,
-        int_temp: float,
-        int_tokens: int,
-        eval_temp: float,
-        eval_tokens: int,
+    model: str,
+    max_turns: int,
+    job_description: str,
+    obs_temp: float,
+    obs_tokens: int,
+    int_temp: float,
+    int_tokens: int,
+    eval_temp: float,
+    eval_tokens: int,
 ) -> tuple[
     str,
     dict[str, Any],
@@ -285,8 +288,8 @@ def start_interview(
 
 
 def add_user_message(
-        message: str,
-        history: list[dict[str, str | None]],
+    message: str,
+    history: list[dict[str, str | None]],
 ) -> tuple[dict[str, Any], list[dict[str, str | None]], dict[str, Any], str]:
     """
     Мгновенно добавляет сообщение пользователя в историю чата, очищает и блокирует ввод.
@@ -316,7 +319,7 @@ def add_user_message(
 
 
 async def bot_respond(
-        history: list[dict[str, str | None]],
+    history: list[dict[str, str | None]],
 ) -> AsyncGenerator[
     tuple[
         str,
@@ -384,7 +387,9 @@ async def bot_respond(
     is_finished: bool
 
     try:
-        response, is_finished = await _current_session.process_message(user_message.strip())
+        response, is_finished = await _current_session.process_message(
+            user_message.strip()
+        )
     except Exception as e:
         logger.error(f"Unexpected error in process_message: {type(e).__name__}: {e}")
         yield (
@@ -419,7 +424,11 @@ async def bot_respond(
         )
 
         try:
-            feedback, summary_path, detailed_path = await _current_session.generate_feedback()
+            (
+                feedback,
+                summary_path,
+                detailed_path,
+            ) = await _current_session.generate_feedback()
         except Exception as e:
             logger.error(f"Feedback generation failed: {type(e).__name__}: {e}")
             updated_history = _append_assistant_message(
@@ -480,7 +489,7 @@ async def bot_respond(
 
 
 async def stop_interview(
-        history: list[dict[str, str | None]],
+    history: list[dict[str, str | None]],
 ) -> AsyncGenerator[
     tuple[
         str,
@@ -541,7 +550,11 @@ async def stop_interview(
     )
 
     try:
-        feedback, summary_path, detailed_path = await _current_session.generate_feedback()
+        (
+            feedback,
+            summary_path,
+            detailed_path,
+        ) = await _current_session.generate_feedback()
     except Exception as e:
         logger.error(f"Feedback generation failed on stop: {type(e).__name__}: {e}")
         updated_history = _append_assistant_message(
@@ -651,60 +664,60 @@ def create_gradio_interface() -> gr.Blocks:
     )
 
     with gr.Blocks(
-            title="Multi-Agent Interview Coach",
-            theme=gr.themes.Base(
-                primary_hue=gr.themes.colors.indigo,
-                secondary_hue=gr.themes.colors.purple,
-                neutral_hue=gr.themes.colors.slate,
-                font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
-                font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "Consolas", "monospace"],
-            ).set(
-                body_background_fill="#0f1117",
-                body_background_fill_dark="#0f1117",
-                block_background_fill="transparent",
-                block_background_fill_dark="transparent",
-                block_border_color="rgba(99, 102, 241, 0.15)",
-                block_border_color_dark="rgba(99, 102, 241, 0.15)",
-                block_label_background_fill="transparent",
-                block_label_background_fill_dark="transparent",
-                block_label_text_color="#94a3b8",
-                block_label_text_color_dark="#94a3b8",
-                block_title_text_color="#e2e8f0",
-                block_title_text_color_dark="#e2e8f0",
-                input_background_fill="#24253a",
-                input_background_fill_dark="#24253a",
-                input_border_color="rgba(99, 102, 241, 0.15)",
-                input_border_color_dark="rgba(99, 102, 241, 0.15)",
-                background_fill_primary="#0f1117",
-                background_fill_primary_dark="#0f1117",
-                background_fill_secondary="transparent",
-                background_fill_secondary_dark="transparent",
-                panel_background_fill="transparent",
-                panel_background_fill_dark="transparent",
-                code_background_fill="#24253a",
-                code_background_fill_dark="#24253a",
-                checkbox_background_color="#24253a",
-                checkbox_background_color_dark="#24253a",
-                button_primary_background_fill="#6366f1",
-                button_primary_background_fill_dark="#6366f1",
-                button_primary_background_fill_hover="#4f46e5",
-                button_primary_background_fill_hover_dark="#4f46e5",
-                button_primary_text_color="white",
-                button_primary_text_color_dark="white",
-                button_secondary_background_fill="#2e3048",
-                button_secondary_background_fill_dark="#2e3048",
-                button_secondary_background_fill_hover="#24253a",
-                button_secondary_background_fill_hover_dark="#24253a",
-                button_secondary_text_color="#94a3b8",
-                button_secondary_text_color_dark="#94a3b8",
-                body_text_color="#e2e8f0",
-                body_text_color_dark="#e2e8f0",
-                body_text_color_subdued="#94a3b8",
-                body_text_color_subdued_dark="#94a3b8",
-                border_color_primary="rgba(99, 102, 241, 0.15)",
-                border_color_primary_dark="rgba(99, 102, 241, 0.15)",
-            ),
-            css=MAIN_CSS,
+        title="Multi-Agent Interview Coach",
+        theme=gr.themes.Base(
+            primary_hue=gr.themes.colors.indigo,
+            secondary_hue=gr.themes.colors.purple,
+            neutral_hue=gr.themes.colors.slate,
+            font=[gr.themes.GoogleFont("Inter"), "system-ui", "sans-serif"],
+            font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "Consolas", "monospace"],
+        ).set(
+            body_background_fill="#0f1117",
+            body_background_fill_dark="#0f1117",
+            block_background_fill="transparent",
+            block_background_fill_dark="transparent",
+            block_border_color="rgba(99, 102, 241, 0.15)",
+            block_border_color_dark="rgba(99, 102, 241, 0.15)",
+            block_label_background_fill="transparent",
+            block_label_background_fill_dark="transparent",
+            block_label_text_color="#94a3b8",
+            block_label_text_color_dark="#94a3b8",
+            block_title_text_color="#e2e8f0",
+            block_title_text_color_dark="#e2e8f0",
+            input_background_fill="#24253a",
+            input_background_fill_dark="#24253a",
+            input_border_color="rgba(99, 102, 241, 0.15)",
+            input_border_color_dark="rgba(99, 102, 241, 0.15)",
+            background_fill_primary="#0f1117",
+            background_fill_primary_dark="#0f1117",
+            background_fill_secondary="transparent",
+            background_fill_secondary_dark="transparent",
+            panel_background_fill="transparent",
+            panel_background_fill_dark="transparent",
+            code_background_fill="#24253a",
+            code_background_fill_dark="#24253a",
+            checkbox_background_color="#24253a",
+            checkbox_background_color_dark="#24253a",
+            button_primary_background_fill="#6366f1",
+            button_primary_background_fill_dark="#6366f1",
+            button_primary_background_fill_hover="#4f46e5",
+            button_primary_background_fill_hover_dark="#4f46e5",
+            button_primary_text_color="white",
+            button_primary_text_color_dark="white",
+            button_secondary_background_fill="#2e3048",
+            button_secondary_background_fill_dark="#2e3048",
+            button_secondary_background_fill_hover="#24253a",
+            button_secondary_background_fill_hover_dark="#24253a",
+            button_secondary_text_color="#94a3b8",
+            button_secondary_text_color_dark="#94a3b8",
+            body_text_color="#e2e8f0",
+            body_text_color_dark="#e2e8f0",
+            body_text_color_subdued="#94a3b8",
+            body_text_color_subdued_dark="#94a3b8",
+            border_color_primary="rgba(99, 102, 241, 0.15)",
+            border_color_primary_dark="rgba(99, 102, 241, 0.15)",
+        ),
+        css=MAIN_CSS,
     ) as app:
         # ── Header ──────────────────────────────────────────────────────
         gr.HTML(HEADER_HTML)
@@ -850,7 +863,7 @@ def create_gradio_interface() -> gr.Blocks:
 
             # ── Right Column: Chat + Feedback ────────────────────────────
             with gr.Column(scale=9, min_width=600):
-                with gr.Tabs() as tabs:
+                with gr.Tabs():
                     # Tab 1: Interview Chat
                     with gr.TabItem("💬 Интервью", id=0):
                         chatbot = gr.Chatbot(
@@ -1032,9 +1045,9 @@ def create_gradio_interface() -> gr.Blocks:
 
 
 def launch_app(
-        server_name: str,
-        server_port: int,
-        share: bool,
+    server_name: str,
+    server_port: int,
+    share: bool,
 ) -> None:
     """
     Запускает Gradio приложение.

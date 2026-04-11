@@ -13,7 +13,6 @@ from typing import Any
 from langfuse import Langfuse
 from langfuse.client import StatefulGenerationClient, StatefulTraceClient
 
-from ..core.config import settings
 from ..core.logger_setup import get_system_logger
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
@@ -191,8 +190,8 @@ class LangfuseTracker:
 
     def __init__(
         self,
-        public_key: str,
-        secret_key: str,
+        public_key: str | None,
+        secret_key: str | None,
         host: str,
         enabled: bool,
     ) -> None:
@@ -564,11 +563,14 @@ def get_langfuse_tracker() -> LangfuseTracker:
     global _tracker_instance
 
     if _tracker_instance is None:
+        from ..core.config import get_settings
+
+        _settings = get_settings()
         _tracker_instance = LangfuseTracker(
-            public_key=settings.LANGFUSE_PUBLIC_KEY,
-            secret_key=settings.LANGFUSE_SECRET_KEY,
-            host=settings.LANGFUSE_HOST,
-            enabled=settings.LANGFUSE_ENABLED,
+            public_key=_settings.LANGFUSE_PUBLIC_KEY,
+            secret_key=_settings.LANGFUSE_SECRET_KEY,
+            host=_settings.LANGFUSE_HOST,
+            enabled=_settings.LANGFUSE_ENABLED,
         )
 
     return _tracker_instance

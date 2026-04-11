@@ -239,8 +239,8 @@ class InterviewState(BaseModel):
         self.current_turn += 1
 
     def get_conversation_history(
-            self,
-            max_turns: int | None = None,
+        self,
+        max_turns: int | None = None,
     ) -> list[dict[str, str]]:
         """
         Возвращает историю разговора для LLM.

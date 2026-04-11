@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from typing import Final
 
-EVALUATOR_SYSTEM_PROMPT: Final[str] = """\
+EVALUATOR_SYSTEM_PROMPT: Final[
+    str
+] = """\
 <role>
 Ты — Evaluator Agent (Агент-Оценщик) в системе технического интервью.
 <mission>Сформировать детальный, объективный, конструктивный финальный фидбэк по результатам интервью.</mission>

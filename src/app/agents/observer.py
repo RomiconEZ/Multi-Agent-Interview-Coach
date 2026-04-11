@@ -7,23 +7,24 @@
 from __future__ import annotations
 
 import logging
+
 from typing import Any
 
-from .base import BaseAgent
-from .prompts import OBSERVER_SYSTEM_PROMPT
 from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient, LLMClientError
 from ..llm.response_parser import extract_json_from_llm_response
 from ..schemas.agent_settings import SingleAgentConfig
 from ..schemas.interview import (
+    UNANSWERED_RESPONSE_TYPES,
     AnswerQuality,
     ExtractedCandidateInfo,
     InternalThought,
     InterviewState,
     ObserverAnalysis,
     ResponseType,
-    UNANSWERED_RESPONSE_TYPES,
 )
+from .base import BaseAgent
+from .prompts import OBSERVER_SYSTEM_PROMPT
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -44,11 +45,11 @@ class ObserverAgent(BaseAgent):
         return OBSERVER_SYSTEM_PROMPT
 
     async def process(
-            self,
-            state: InterviewState,
-            user_message: str,
-            last_question: str,
-            **kwargs: Any,
+        self,
+        state: InterviewState,
+        user_message: str,
+        last_question: str,
+        **kwargs: Any,
     ) -> ObserverAnalysis:
         """
         Анализирует ответ кандидата.
@@ -99,10 +100,10 @@ class ObserverAgent(BaseAgent):
         raise last_error  # type: ignore[misc]
 
     def _build_analysis_context(
-            self,
-            state: InterviewState,
-            user_message: str,
-            last_question: str,
+        self,
+        state: InterviewState,
+        user_message: str,
+        last_question: str,
     ) -> str:
         """
         Строит контекст для анализа.
@@ -174,18 +175,16 @@ class ObserverAgent(BaseAgent):
 
         summary_parts: list[str] = []
         for turn in state.turns[-5:]:
-            summary_parts.append(
-                f"**Интервьюер:** {turn.agent_visible_message[:100]}..."
-            )
+            summary_parts.append(f"**Интервьюер:** {turn.agent_visible_message[:100]}...")
             if turn.user_message:
                 summary_parts.append(f"**Кандидат:** {turn.user_message[:100]}...")
 
         return "\n".join(summary_parts)
 
     def _parse_analysis(
-            self,
-            response: dict[str, Any],
-            user_message: str,
+        self,
+        response: dict[str, Any],
+        user_message: str,
     ) -> ObserverAnalysis:
         """
         Парсит ответ LLM в ObserverAnalysis.
@@ -264,9 +263,9 @@ def _safe_parse_enum(enum_cls: type, value: Any, default: Any) -> Any:
 
 
 def _resolve_answered_last_question(
-        response: dict[str, Any],
-        response_type: ResponseType,
-        is_gibberish: bool,
+    response: dict[str, Any],
+    response_type: ResponseType,
+    is_gibberish: bool,
 ) -> bool:
     """
     Определяет значение ``answered_last_question``.
@@ -292,7 +291,7 @@ def _resolve_answered_last_question(
 
 
 def _parse_extracted_info(
-        data: Any,
+    data: Any,
 ) -> ExtractedCandidateInfo | None:
     """
     Парсит извлечённую информацию о кандидате.

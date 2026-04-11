@@ -7,10 +7,9 @@
 from __future__ import annotations
 
 import logging
+
 from typing import Any
 
-from .base import BaseAgent
-from .prompts import INTERVIEWER_SYSTEM_PROMPT
 from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient
 from ..schemas.agent_settings import SingleAgentConfig
@@ -21,6 +20,8 @@ from ..schemas.interview import (
     ObserverAnalysis,
     ResponseType,
 )
+from .base import BaseAgent
+from .prompts import INTERVIEWER_SYSTEM_PROMPT
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -38,11 +39,11 @@ class InterviewerAgent(BaseAgent):
     """
 
     def __init__(
-            self,
-            llm_client: LLMClient,
-            config: SingleAgentConfig,
-            history_window_turns: int,
-            greeting_max_tokens: int,
+        self,
+        llm_client: LLMClient,
+        config: SingleAgentConfig,
+        history_window_turns: int,
+        greeting_max_tokens: int,
     ) -> None:
         super().__init__("Interviewer_Agent", llm_client, config)
         self._history_window_turns = history_window_turns
@@ -107,11 +108,11 @@ class InterviewerAgent(BaseAgent):
         return response.strip()
 
     async def process(
-            self,
-            state: InterviewState,
-            analysis: ObserverAnalysis,
-            user_message: str,
-            **kwargs: Any,
+        self,
+        state: InterviewState,
+        analysis: ObserverAnalysis,
+        user_message: str,
+        **kwargs: Any,
     ) -> tuple[str, list[InternalThought]]:
         """
         Генерирует следующую реплику на основе анализа.
@@ -145,10 +146,10 @@ class InterviewerAgent(BaseAgent):
         return response.strip(), thoughts
 
     def _build_response_context(
-            self,
-            state: InterviewState,
-            analysis: ObserverAnalysis,
-            user_message: str,
+        self,
+        state: InterviewState,
+        analysis: ObserverAnalysis,
+        user_message: str,
     ) -> str:
         """
         Строит контекст для генерации ответа.
@@ -177,7 +178,7 @@ class InterviewerAgent(BaseAgent):
                 f"- Технологии: {', '.join(state.candidate.technologies)}"
             )
             context_parts.append(
-                f"- **ВАЖНО:** Задавай вопросы ТОЛЬКО по этим технологиям!"
+                "- **ВАЖНО:** Задавай вопросы ТОЛЬКО по этим технологиям!"
             )
 
         if not any([state.candidate.name, state.candidate.position]):
@@ -235,9 +236,9 @@ class InterviewerAgent(BaseAgent):
         return "\n".join(context_parts)
 
     def _get_response_instruction(
-            self,
-            analysis: ObserverAnalysis,
-            state: InterviewState,
+        self,
+        analysis: ObserverAnalysis,
+        state: InterviewState,
     ) -> str:
         """
         Возвращает инструкцию в зависимости от типа ответа и статуса якоря.
@@ -274,8 +275,8 @@ class InterviewerAgent(BaseAgent):
 
         if response_type == ResponseType.HALLUCINATION:
             correct: str = (
-                    analysis.correct_answer
-                    or "информацию можно найти в официальной документации"
+                analysis.correct_answer
+                or "информацию можно найти в официальной документации"
             )
             if analysis.answered_last_question:
                 return self._get_hallucination_on_topic_instruction(correct, state)
@@ -335,9 +336,9 @@ class InterviewerAgent(BaseAgent):
         return self._get_next_question_instruction(state, praise=False)
 
     def _get_hallucination_on_topic_instruction(
-            self,
-            correct_answer: str,
-            state: InterviewState,
+        self,
+        correct_answer: str,
+        state: InterviewState,
     ) -> str:
         """
         Возвращает инструкцию для галлюцинации по теме вопроса.
@@ -385,9 +386,9 @@ class InterviewerAgent(BaseAgent):
         )
 
     def _get_next_question_instruction(
-            self,
-            state: InterviewState,
-            praise: bool,
+        self,
+        state: InterviewState,
+        praise: bool,
     ) -> str:
         """
         Возвращает инструкцию для перехода к следующему вопросу.
@@ -451,9 +452,7 @@ class InterviewerAgent(BaseAgent):
             else "Кандидат НЕ ответил на вопрос — переформулирую активный якорь."
         )
 
-        gibberish_flag: str = (
-            " [GIBBERISH DETECTED]" if analysis.is_gibberish else ""
-        )
+        gibberish_flag: str = " [GIBBERISH DETECTED]" if analysis.is_gibberish else ""
 
         base_thoughts: dict[ResponseType, str] = {
             ResponseType.INTRODUCTION: "Кандидат представился. Анализирую опыт и технологии для релевантных вопросов.",

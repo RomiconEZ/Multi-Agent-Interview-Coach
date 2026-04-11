@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import traceback
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from ..core.logger_setup import get_system_logger
+from ..utils.url import mask_url
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -107,6 +109,7 @@ class WebhookAlertChannel:
 
     def __init__(self, url: str, timeout_seconds: float) -> None:
         self._url = url
+        self._masked_url: str = mask_url(url)
         self._timeout = timeout_seconds
         self._client: httpx.AsyncClient | None = None
 
@@ -144,14 +147,14 @@ class WebhookAlertChannel:
             if response.status_code >= 400:
                 logger.warning(
                     f"Webhook alert delivery failed: "
-                    f"status={response.status_code}, url={self._url}"
+                    f"status={response.status_code}, url={self._masked_url}"
                 )
             else:
                 logger.debug(
                     f"Webhook alert delivered: "
-                    f"status={response.status_code}, url={self._url}"
+                    f"status={response.status_code}, url={self._masked_url}"
                 )
-        except (httpx.RequestError, httpx.TimeoutException) as exc:
+        except httpx.RequestError as exc:
             tb: str = traceback.format_exc().replace("\n", " | ")
             logger.warning(f"Webhook alert delivery error: {exc} | traceback: {tb}")
 
@@ -174,6 +177,24 @@ class AlertManager:
 
     def __init__(self, channels: tuple[AlertChannel, ...]) -> None:
         self._channels: tuple[AlertChannel, ...] = channels
+
+    async def close(self) -> None:
+        """Закрывает все каналы, поддерживающие метод ``close``."""
+        for channel in self._channels:
+            close_fn = getattr(channel, "close", None)
+            if (
+                close_fn is not None
+                and callable(close_fn)
+                and inspect.iscoroutinefunction(close_fn)
+            ):
+                try:
+                    await close_fn()
+                except Exception as exc:
+                    tb: str = traceback.format_exc().replace("\n", " | ")
+                    logger.warning(
+                        f"Alert channel {type(channel).__name__} close failed: "
+                        f"{exc} | traceback: {tb}"
+                    )
 
     async def fire(self, alert: Alert) -> None:
         """
@@ -237,6 +258,19 @@ class AlertManager:
 _alert_manager: AlertManager | None = None
 
 
+async def close_alert_manager() -> None:
+    """
+    Закрывает глобальный менеджер алертов и освобождает ресурсы каналов.
+
+    Безопасно вызывать повторно или когда менеджер не был инициализирован.
+    """
+    global _alert_manager
+    if _alert_manager is not None:
+        await _alert_manager.close()
+        _alert_manager = None
+        logger.info("Alert manager closed")
+
+
 def configure_alert_manager(
     webhook_url: str | None,
     webhook_timeout: float,
@@ -246,6 +280,8 @@ def configure_alert_manager(
 
     Всегда регистрирует ``LogAlertChannel``.
     Если задан ``webhook_url``, дополнительно регистрирует ``WebhookAlertChannel``.
+    При повторном вызове предыдущий менеджер логирует предупреждение
+    (для корректного закрытия ресурсов используйте ``close_alert_manager``).
 
     :param webhook_url: URL вебхука для отправки алертов (None — не использовать).
     :param webhook_timeout: Таймаут HTTP-запроса к вебхуку в секундах.
@@ -253,12 +289,19 @@ def configure_alert_manager(
     """
     global _alert_manager
 
+    if _alert_manager is not None:
+        logger.warning(
+            "Alert manager is being reconfigured; "
+            "call close_alert_manager() first to release previous resources"
+        )
+
     channels: list[AlertChannel] = [LogAlertChannel()]
     if webhook_url:
         channels.append(
             WebhookAlertChannel(url=webhook_url, timeout_seconds=webhook_timeout)
         )
-        logger.info(f"Webhook alert channel configured: {webhook_url}")
+        masked: str = mask_url(webhook_url)
+        logger.info(f"Webhook alert channel configured: {masked}")
 
     _alert_manager = AlertManager(channels=tuple(channels))
     logger.info(f"Alert manager configured with {len(channels)} channel(s)")

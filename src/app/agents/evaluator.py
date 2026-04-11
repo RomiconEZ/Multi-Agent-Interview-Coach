@@ -7,10 +7,9 @@
 from __future__ import annotations
 
 import logging
+
 from typing import Any
 
-from .base import BaseAgent
-from .prompts import EVALUATOR_SYSTEM_PROMPT
 from ..core.logger_setup import get_system_logger
 from ..llm.client import LLMClient, LLMClientError
 from ..llm.response_parser import extract_json_from_llm_response
@@ -28,6 +27,8 @@ from ..schemas.feedback import (
     Verdict,
 )
 from ..schemas.interview import InterviewState
+from .base import BaseAgent
+from .prompts import EVALUATOR_SYSTEM_PROMPT
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -48,9 +49,9 @@ class EvaluatorAgent(BaseAgent):
         return EVALUATOR_SYSTEM_PROMPT
 
     async def process(
-            self,
-            state: InterviewState,
-            **kwargs: Any,
+        self,
+        state: InterviewState,
+        **kwargs: Any,
     ) -> InterviewFeedback:
         """
         Генерирует финальный фидбэк.
@@ -118,9 +119,7 @@ class EvaluatorAgent(BaseAgent):
                 f"Целевой грейд: {state.candidate.target_grade.value}"
             )
         if state.candidate.experience:
-            candidate_info_parts.append(
-                f"Заявленный опыт: {state.candidate.experience}"
-            )
+            candidate_info_parts.append(f"Заявленный опыт: {state.candidate.experience}")
 
         candidate_block: str = (
             chr(10).join(candidate_info_parts)
@@ -212,12 +211,16 @@ class EvaluatorAgent(BaseAgent):
         if state.covered_topics:
             lines.append(f"Затронутые темы: {', '.join(state.covered_topics)}")
 
-        return "\n".join(lines) if lines else "Данные отсутствуют — интервью было слишком коротким."
+        return (
+            "\n".join(lines)
+            if lines
+            else "Данные отсутствуют — интервью было слишком коротким."
+        )
 
     def _parse_feedback(
-            self,
-            response: dict[str, Any],
-            state: InterviewState,
+        self,
+        response: dict[str, Any],
+        state: InterviewState,
     ) -> InterviewFeedback:
         """
         Парсит ответ LLM в InterviewFeedback.

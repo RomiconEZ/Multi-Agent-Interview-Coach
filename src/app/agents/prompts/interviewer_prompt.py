@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from typing import Final
 
-INTERVIEWER_SYSTEM_PROMPT: Final[str] = """\
+INTERVIEWER_SYSTEM_PROMPT: Final[
+    str
+] = """\
 <role>
 Ты — AI-интервьюер на техническом собеседовании.
 <language>Русский.</language>

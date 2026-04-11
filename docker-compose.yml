@@ -10,7 +10,6 @@ services:
       - "${GRADIO_PORT:-7860}:7860"
     volumes:
       - ./src/app:/code/app
-      - ./.env:/code/.env
       - interview-logs:/code/interview_logs
     restart: on-failure:3
     depends_on:
@@ -30,11 +29,12 @@ services:
     expose:
       - "${BACKEND_PORT}"
     depends_on:
-      - redis_cache
-      - langfuse
+      redis_cache:
+        condition: service_started
+      langfuse:
+        condition: service_started
     volumes:
       - ./src/app:/code/app
-      - ./.env:/code/.env
     restart: on-failure:3
     networks: [internal]
 
@@ -68,6 +68,8 @@ services:
       POSTGRES_USER: ${LANGFUSE_DB_USER:-langfuse}
       POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
       POSTGRES_DB: ${LANGFUSE_DB_NAME:-langfuse}
+    expose:
+      - "5432"
     volumes:
       - langfuse-db-data:/var/lib/postgresql/data
     healthcheck:

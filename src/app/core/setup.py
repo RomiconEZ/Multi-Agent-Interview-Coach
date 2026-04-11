@@ -10,10 +10,12 @@ from fastapi import APIRouter, FastAPI
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
+from ..llm.client import close_shared_llm_cache
 from ..middleware.client_cache_middleware import ClientCacheMiddleware
 from ..observability import get_langfuse_tracker
-from ..observability.alerts import configure_alert_manager
+from ..observability.alerts import close_alert_manager, configure_alert_manager
 from ..utils import cache
+from ..utils.url import mask_url
 from .config import Settings
 from .logger_setup import get_system_logger
 
@@ -39,7 +41,8 @@ async def create_redis_cache_pool(redis_url: str) -> None:
 
     :param redis_url: URL подключения к Redis.
     """
-    logger_system.info(f"Creating Redis cache pool at {redis_url}.")
+    masked_url: str = mask_url(redis_url)
+    logger_system.info(f"Creating Redis cache pool at {masked_url}.")
     pool = redis.ConnectionPool.from_url(redis_url)
     client = redis.Redis.from_pool(pool)
     cache.set_redis_connection(pool, client)
@@ -91,13 +94,16 @@ def lifespan_factory(
 
         await set_threadpool_tokens(threadpool_tokens)
 
-        configure_alert_manager(
-            webhook_url=settings.ALERT_WEBHOOK_URL,
-            webhook_timeout=settings.ALERT_WEBHOOK_TIMEOUT,
-        )
-        logger_system.info("Alert manager configured.")
-
         try:
+            configure_alert_manager(
+                webhook_url=settings.ALERT_WEBHOOK_URL,
+                webhook_timeout=settings.ALERT_WEBHOOK_TIMEOUT,
+            )
+            logger_system.info("Alert manager configured.")
+
+            settings.ensure_directories()
+            logger_system.info("Required directories created.")
+
             await create_redis_cache_pool(settings.REDIS_CACHE_URL)
             redis_cache_created = True
             logger_system.info("Redis cache pool successfully created.")
@@ -107,8 +113,12 @@ def lifespan_factory(
             yield
 
         finally:
+            await close_shared_llm_cache()
+
             if redis_cache_created:
                 await close_redis_cache_pool()
+
+            await close_alert_manager()
 
             shutdown_langfuse()
 

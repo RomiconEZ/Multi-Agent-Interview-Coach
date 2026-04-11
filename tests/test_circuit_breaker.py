@@ -2,12 +2,13 @@
 Тесты для модуля circuit breaker.
 
 Покрывает: переходы состояний, пороги сбоев, таймаут восстановления,
-сброс при успехе, проверку check().
+сброс при успехе, проверку check(), отправку алертов.
 """
 
 from __future__ import annotations
 
-import time
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -58,37 +59,43 @@ class TestCircuitBreakerTransitions:
 
     def test_open_to_half_open_after_recovery_timeout(self) -> None:
         """Переход OPEN → HALF_OPEN после истечения таймаута восстановления."""
-        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.1)
-        cb.record_failure()
-        assert cb.state == CircuitState.OPEN
+        with patch("src.app.llm.circuit_breaker.time.monotonic") as mock_time:
+            mock_time.return_value = 1000.0
+            cb = CircuitBreaker(failure_threshold=1, recovery_timeout=10.0)
+            cb.record_failure()
+            assert cb.state == CircuitState.OPEN
 
-        time.sleep(0.15)
-        assert cb.state == CircuitState.HALF_OPEN
+            mock_time.return_value = 1010.1
+            assert cb.state == CircuitState.HALF_OPEN
 
     def test_half_open_to_closed_on_success(self) -> None:
         """Переход HALF_OPEN → CLOSED при успешном запросе."""
-        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.1)
-        cb.record_failure()
-        assert cb.state == CircuitState.OPEN
+        with patch("src.app.llm.circuit_breaker.time.monotonic") as mock_time:
+            mock_time.return_value = 1000.0
+            cb = CircuitBreaker(failure_threshold=1, recovery_timeout=10.0)
+            cb.record_failure()
+            assert cb.state == CircuitState.OPEN
 
-        time.sleep(0.15)
-        assert cb.state == CircuitState.HALF_OPEN
+            mock_time.return_value = 1010.1
+            assert cb.state == CircuitState.HALF_OPEN
 
-        cb.record_success()
-        assert cb.state == CircuitState.CLOSED
-        assert cb.failure_count == 0
+            cb.record_success()
+            assert cb.state == CircuitState.CLOSED
+            assert cb.failure_count == 0
 
     def test_half_open_to_open_on_failure(self) -> None:
         """Переход HALF_OPEN → OPEN при сбое в пробном запросе."""
-        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.1)
-        cb.record_failure()
-        assert cb.state == CircuitState.OPEN
+        with patch("src.app.llm.circuit_breaker.time.monotonic") as mock_time:
+            mock_time.return_value = 1000.0
+            cb = CircuitBreaker(failure_threshold=1, recovery_timeout=10.0)
+            cb.record_failure()
+            assert cb.state == CircuitState.OPEN
 
-        time.sleep(0.15)
-        assert cb.state == CircuitState.HALF_OPEN
+            mock_time.return_value = 1010.1
+            assert cb.state == CircuitState.HALF_OPEN
 
-        cb.record_failure()
-        assert cb.state == CircuitState.OPEN
+            cb.record_failure()
+            assert cb.state == CircuitState.OPEN
 
 
 class TestCircuitBreakerCheck:
@@ -113,11 +120,14 @@ class TestCircuitBreakerCheck:
 
     def test_check_passes_when_half_open(self) -> None:
         """check() пропускает запрос в состоянии HALF_OPEN."""
-        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.1)
-        cb.record_failure()
-        time.sleep(0.15)
-        assert cb.state == CircuitState.HALF_OPEN
-        cb.check()
+        with patch("src.app.llm.circuit_breaker.time.monotonic") as mock_time:
+            mock_time.return_value = 1000.0
+            cb = CircuitBreaker(failure_threshold=1, recovery_timeout=10.0)
+            cb.record_failure()
+
+            mock_time.return_value = 1010.1
+            assert cb.state == CircuitState.HALF_OPEN
+            cb.check()
 
 
 class TestCircuitBreakerReset:
@@ -194,28 +204,124 @@ class TestCircuitBreakerEdgeCases:
 
     def test_recovery_timeout_boundary(self) -> None:
         """Проверка перехода точно на границе таймаута восстановления."""
-        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.05)
-        cb.record_failure()
-        assert cb.state == CircuitState.OPEN
+        with patch("src.app.llm.circuit_breaker.time.monotonic") as mock_time:
+            mock_time.return_value = 1000.0
+            cb = CircuitBreaker(failure_threshold=1, recovery_timeout=10.0)
+            cb.record_failure()
+            assert cb.state == CircuitState.OPEN
 
-        time.sleep(0.06)
-        assert cb.state == CircuitState.HALF_OPEN
+            mock_time.return_value = 1010.1
+            assert cb.state == CircuitState.HALF_OPEN
 
     def test_rapid_open_close_cycle(self) -> None:
         """Быстрый цикл OPEN → HALF_OPEN → CLOSED."""
-        cb = CircuitBreaker(failure_threshold=2, recovery_timeout=0.05)
+        with patch("src.app.llm.circuit_breaker.time.monotonic") as mock_time:
+            mock_time.return_value = 1000.0
+            cb = CircuitBreaker(failure_threshold=2, recovery_timeout=10.0)
 
-        cb.record_failure()
-        cb.record_failure()
-        assert cb.state == CircuitState.OPEN
+            cb.record_failure()
+            cb.record_failure()
+            assert cb.state == CircuitState.OPEN
 
-        time.sleep(0.06)
-        assert cb.state == CircuitState.HALF_OPEN
+            mock_time.return_value = 1010.1
+            assert cb.state == CircuitState.HALF_OPEN
 
-        cb.record_success()
-        assert cb.state == CircuitState.CLOSED
-        assert cb.failure_count == 0
+            cb.record_success()
+            assert cb.state == CircuitState.CLOSED
+            assert cb.failure_count == 0
 
-        cb.record_failure()
-        assert cb.failure_count == 1
-        assert cb.state == CircuitState.CLOSED
+            cb.record_failure()
+            assert cb.failure_count == 1
+            assert cb.state == CircuitState.CLOSED
+
+
+class TestFireOpenAlert:
+    """Тесты отправки алерта при открытии circuit breaker."""
+
+    @staticmethod
+    def _closing_create_task(coro: Any) -> MagicMock:
+        """Мок ``create_task``, который корректно закрывает переданную корутину."""
+        coro.close()
+        return MagicMock()
+
+    def test_alert_fires_on_first_open(self) -> None:
+        """При первом переходе в OPEN отправляется CRITICAL-алерт."""
+        with patch("src.app.llm.circuit_breaker.time.monotonic", return_value=1000.0):
+            cb = CircuitBreaker(failure_threshold=2, recovery_timeout=60.0)
+
+        mock_alert_mgr = MagicMock()
+        mock_alert_mgr.fire_critical = AsyncMock()
+
+        with (
+            patch("src.app.llm.circuit_breaker.time.monotonic", return_value=1001.0),
+            patch(
+                "src.app.observability.alerts.get_alert_manager",
+                return_value=mock_alert_mgr,
+            ),
+            patch("src.app.llm.circuit_breaker.asyncio.get_running_loop") as mock_loop,
+        ):
+            mock_loop.return_value.create_task = MagicMock(
+                side_effect=self._closing_create_task,
+            )
+
+            cb.record_failure()
+            cb.record_failure()
+
+            mock_loop.return_value.create_task.assert_called_once()
+
+    def test_alert_not_fired_when_already_open(self) -> None:
+        """Повторные сбои в состоянии OPEN не отправляют алерт повторно."""
+        with patch("src.app.llm.circuit_breaker.time.monotonic", return_value=1000.0):
+            cb = CircuitBreaker(failure_threshold=1, recovery_timeout=60.0)
+
+        mock_alert_mgr = MagicMock()
+        mock_alert_mgr.fire_critical = AsyncMock()
+
+        with (
+            patch("src.app.llm.circuit_breaker.time.monotonic", return_value=1001.0),
+            patch(
+                "src.app.observability.alerts.get_alert_manager",
+                return_value=mock_alert_mgr,
+            ),
+            patch("src.app.llm.circuit_breaker.asyncio.get_running_loop") as mock_loop,
+        ):
+            mock_loop.return_value.create_task = MagicMock(
+                side_effect=self._closing_create_task,
+            )
+
+            cb.record_failure()
+            assert mock_loop.return_value.create_task.call_count == 1
+
+            cb.record_failure()
+            assert mock_loop.return_value.create_task.call_count == 1
+
+    def test_alert_skipped_when_no_event_loop(self) -> None:
+        """Если event loop недоступен, алерт пропускается без ошибки."""
+        with patch("src.app.llm.circuit_breaker.time.monotonic", return_value=1000.0):
+            cb = CircuitBreaker(failure_threshold=1, recovery_timeout=60.0)
+
+        with (
+            patch("src.app.llm.circuit_breaker.time.monotonic", return_value=1001.0),
+            patch(
+                "src.app.llm.circuit_breaker.asyncio.get_running_loop",
+                side_effect=RuntimeError("no running event loop"),
+            ),
+        ):
+            cb.record_failure()
+            assert cb.state == CircuitState.OPEN
+
+    def test_alert_exception_does_not_break_state_transition(self) -> None:
+        """Ошибка при отправке алерта не мешает переходу состояния."""
+        with patch("src.app.llm.circuit_breaker.time.monotonic", return_value=1000.0):
+            cb = CircuitBreaker(failure_threshold=1, recovery_timeout=60.0)
+
+        with (
+            patch("src.app.llm.circuit_breaker.time.monotonic", return_value=1001.0),
+            patch(
+                "src.app.observability.alerts.get_alert_manager",
+                side_effect=Exception("test error"),
+            ),
+        ):
+            cb.record_failure()
+            assert cb.state == CircuitState.OPEN
+            assert cb.failure_count == 1

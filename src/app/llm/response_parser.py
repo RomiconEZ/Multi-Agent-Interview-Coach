@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+
 from typing import Any
 
 from ..core.logger_setup import get_system_logger
@@ -87,8 +88,7 @@ def extract_json_from_llm_response(text: str) -> dict[str, Any]:
         return parsed
 
     raise ValueError(
-        f"No valid JSON found in LLM response (length={len(text)}): "
-        f"{text[:300]}"
+        f"No valid JSON found in LLM response (length={len(text)}): " f"{text[:300]}"
     )
 
 
@@ -151,7 +151,7 @@ def _extract_raw_json_object(text: str) -> dict[str, Any] | None:
     if end <= start:
         return None
 
-    candidate: str = text[start: end + 1]
+    candidate: str = text[start : end + 1]
     parsed: dict[str, Any] | None = _try_parse_json(candidate)
     if parsed is not None:
         return parsed
@@ -185,7 +185,7 @@ def _extract_raw_json_object(text: str) -> dict[str, Any] | None:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                candidate = text[start: i + 1]
+                candidate = text[start : i + 1]
                 parsed = _try_parse_json(candidate)
                 if parsed is not None:
                     return parsed
