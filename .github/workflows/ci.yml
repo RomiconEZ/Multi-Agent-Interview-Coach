@@ -221,4 +221,5 @@ jobs:
       - name: Export requirements and run safety
         run: |
           poetry export --without-hashes -f requirements.txt -o requirements.txt
-          poetry run safety check -r requirements.txt --full-report
+          poetry run safety check -r requirements.txt --full-report \
+            --policy-file .safety-policy.yml

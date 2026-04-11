@@ -1,0 +1,155 @@
+# =============================================================================
+# Safety Policy — Multi-Agent Interview Coach
+# =============================================================================
+# Документация по игнорируемым уязвимостям в CI/CD pipeline.
+# Используется командой: safety check --policy-file .safety-policy.yml
+#
+# Категории исключений:
+#   1. Major version bump — требуется миграция, отслеживается отдельно
+#   2. No fix available  — патч не выпущен вендором
+#   3. False positive    — CVE относится к другому компоненту (не Python SDK)
+#   4. Disputed          — оспорено вендором
+#   5. Not applicable    — не применимо к нашему окружению
+# =============================================================================
+
+security:
+
+  ignore-vulnerabilities:
+
+    # -----------------------------------------------------------------
+    # gradio 5.x → требуется миграция на 6.7+ (major version bump)
+    # -----------------------------------------------------------------
+    88014:
+      reason: >-
+        gradio SSRF via proxy_url (CVE-2026-28416) — requires gradio >=6.6.0.
+        Major version migration tracked separately.
+      expires: "2026-10-01"
+
+    88013:
+      reason: >-
+        gradio Open Redirect via _target_url (CVE-2026-28415) — requires
+        gradio >=6.6.0. Major version migration tracked separately.
+      expires: "2026-10-01"
+
+    72086:
+      reason: >-
+        gradio code injection (CVE-2024-39236) — DISPUTED by vendor.
+        Report describes a user attacking themselves, not a real attack vector.
+
+    88012:
+      reason: >-
+        gradio Path Traversal on Windows + Python 3.13+ (CVE-2026-28414) —
+        not applicable: project runs on Linux with Python 3.11.
+
+    88010:
+      reason: >-
+        gradio mocked OAuth info disclosure (CVE-2026-27167) — requires
+        gradio >=6.6.0. OAuth is not used in this project. Major version
+        migration tracked separately.
+      expires: "2026-10-01"
+
+    # -----------------------------------------------------------------
+    # gunicorn — no patched version available
+    # -----------------------------------------------------------------
+    71600:
+      reason: >-
+        gunicorn HTTP Request Smuggling (CVE-2024-1135) — affected spec
+        >=0.10.0, no patched version released. Mitigated by nginx reverse
+        proxy in front of gunicorn that normalises Transfer-Encoding headers.
+
+    # -----------------------------------------------------------------
+    # langfuse — false positives (server-side / JS vulnerabilities,
+    # not the Python SDK)
+    # -----------------------------------------------------------------
+    74955:
+      reason: >-
+        langfuse nanoid upgrade (CVE-2024-55565) — JavaScript dependency
+        of Langfuse web platform, does not affect the Python SDK.
+
+    77285:
+      reason: >-
+        langfuse hyperlink injection in invitation emails (PVE-2025-77285) —
+        web UI vulnerability in Langfuse platform, not the Python SDK.
+
+    73564:
+      reason: >-
+        langfuse Open Redirect in sign-in URL (PVE-2024-73564) — web UI
+        vulnerability in Langfuse platform, not the Python SDK.
+
+    83165:
+      reason: >-
+        langfuse SSRF via webhook redirects (PVE-2025-83165) — server-side
+        webhook processing in Langfuse platform, not the Python SDK.
+
+    75620:
+      reason: >-
+        langfuse DOMPurify XSS (PVE-2025-75620) — JavaScript dependency
+        of Langfuse web platform, not the Python SDK.
+
+    75618:
+      reason: >-
+        langfuse jsonpath-plus upgrade (PVE-2025-75618) — JavaScript
+        dependency of Langfuse web platform, not the Python SDK.
+
+    74718:
+      reason: >-
+        langfuse next-auth upgrade (CVE-2023-48309) — JavaScript dependency
+        of Langfuse web platform, not the Python SDK.
+
+    75619:
+      reason: >-
+        langfuse DOMPurify + release-it upgrade (PVE-2025-75619) — JavaScript
+        dependency of Langfuse web platform, not the Python SDK.
+
+    82116:
+      reason: >-
+        langfuse Open Redirect in auth flow (PVE-2025-82116) — client-side
+        web UI vulnerability in Langfuse platform, not the Python SDK.
+
+    84393:
+      reason: >-
+        langfuse SSRF via PostHog base URL (PVE-2026-84393) — server-side
+        configuration in Langfuse platform, not the Python SDK.
+
+    74956:
+      reason: >-
+        langfuse next.js upgrade (CVE-2024-56332) — JavaScript dependency
+        of Langfuse web platform, not the Python SDK.
+
+    75964:
+      reason: >-
+        langfuse axios upgrade (CVE-2025-27152) — JavaScript dependency
+        of Langfuse web platform, not the Python SDK.
+
+    75139:
+      reason: >-
+        langfuse katex upgrade (CVE-2025-23207) — JavaScript dependency
+        of Langfuse web platform, not the Python SDK.
+
+    # -----------------------------------------------------------------
+    # pillow — transitive dependency constrained by gradio to <12.0
+    # -----------------------------------------------------------------
+    86269:
+      reason: >-
+        pillow Out-of-bounds Write in PSD decoding (CVE-2026-25990) —
+        transitive dependency locked to <12.0 by gradio 5.x constraint.
+        Will be resolved with gradio 6.x migration. PSD files are not
+        processed by this application.
+      expires: "2026-10-01"
+
+    # -----------------------------------------------------------------
+    # starlette — transitive dependency constrained by fastapi 0.115.x
+    # -----------------------------------------------------------------
+    78279:
+      reason: >-
+        starlette DoS via large file uploads (CVE-2025-54121) — transitive
+        dependency locked to <0.47.0 by fastapi 0.115.x. Will be resolved
+        with fastapi version update. Upload size is limited by nginx.
+      expires: "2026-10-01"
+
+    80876:
+      reason: >-
+        starlette DoS via Range header (CVE-2025-62727) — transitive
+        dependency locked to <0.49.1 by fastapi 0.115.x. Will be resolved
+        with fastapi version update. Static file serving is handled by nginx.
+      expires: "2026-10-01"
