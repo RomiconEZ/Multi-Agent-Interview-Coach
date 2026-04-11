@@ -523,6 +523,45 @@ class LangfuseTracker:
             f"cost_usd=${total_cost:.6f}"
         )
 
+    def log_alert(
+        self,
+        severity: str,
+        source: str,
+        message: str,
+        timestamp: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        """
+        Создаёт trace-алерт в Langfuse для мониторинга критических событий.
+
+        :param severity: Уровень критичности (info, warning, critical).
+        :param source: Источник алерта (имя компонента).
+        :param message: Описание события.
+        :param timestamp: Время возникновения (ISO 8601).
+        :param metadata: Дополнительные данные о событии.
+        """
+        if not self.is_enabled:
+            return
+        try:
+            self._client.trace(
+                name="alert",
+                input={
+                    "severity": severity,
+                    "source": source,
+                    "message": message,
+                },
+                metadata={
+                    "alert_timestamp": timestamp,
+                    **metadata,
+                },
+                tags=["alert", severity],
+            )
+            logger.debug(
+                f"Alert logged to Langfuse: severity={severity}, source={source}"
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to log alert to Langfuse: {exc}")
+
     def flush(self) -> None:
         """Отправляет все накопленные данные."""
         if self._client is not None:

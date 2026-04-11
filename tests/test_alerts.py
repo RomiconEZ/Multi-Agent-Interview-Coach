@@ -1,29 +1,26 @@
 """
 Тесты для модуля алертинга.
 
-Покрывает: Alert модель, LogAlertChannel, WebhookAlertChannel (мок),
+Покрывает: Alert модель, LogAlertChannel, LangfuseAlertChannel (мок),
 AlertManager, фабрику configure_alert_manager, get_alert_manager.
 """
 
 from __future__ import annotations
 
 import logging
-
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
-
 from pydantic import ValidationError
 
 from src.app.observability.alerts import (
     Alert,
     AlertManager,
     AlertSeverity,
+    LangfuseAlertChannel,
     LogAlertChannel,
-    WebhookAlertChannel,
     configure_alert_manager,
     get_alert_manager,
 )
@@ -141,7 +138,9 @@ class TestLogAlertChannel:
 
         assert any("INFO" in record.message for record in caplog.records)
 
-    async def test_send_includes_metadata(self, caplog: pytest.LogCaptureFixture) -> None:
+    async def test_send_includes_metadata(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Метаданные включаются в лог-сообщение."""
         channel = LogAlertChannel()
         alert = Alert(
@@ -156,15 +155,12 @@ class TestLogAlertChannel:
         assert any("gpt-4" in record.message for record in caplog.records)
 
 
-class TestWebhookAlertChannel:
-    """Тесты канала алертов через HTTP webhook."""
+class TestLangfuseAlertChannel:
+    """Тесты канала алертов через Langfuse."""
 
-    async def test_send_posts_to_url(self) -> None:
-        """Алерт отправляется POST-запросом на указанный URL."""
-        channel = WebhookAlertChannel(
-            url="https://hooks.example.com/alert",
-            timeout_seconds=5.0,
-        )
+    async def test_send_calls_log_alert(self) -> None:
+        """send() вызывает tracker.log_alert с корректными параметрами."""
+        channel = LangfuseAlertChannel()
         alert = Alert(
             severity=AlertSeverity.CRITICAL,
             source="llm_client",
@@ -172,106 +168,67 @@ class TestWebhookAlertChannel:
             metadata={"model": "local_llm"},
         )
 
-        mock_response = AsyncMock()
-        mock_response.status_code = 200
+        mock_tracker = MagicMock()
+        mock_tracker.log_alert = MagicMock()
 
-        mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client.is_closed = False
-        channel._client = mock_client
+        with patch(
+            "src.app.observability.alerts.get_langfuse_tracker",
+            return_value=mock_tracker,
+        ):
+            await channel.send(alert)
 
-        await channel.send(alert)
-
-        mock_client.post.assert_awaited_once()
-        call_args = mock_client.post.call_args
-        assert call_args[0][0] == "https://hooks.example.com/alert"
-        payload: dict[str, Any] = call_args[1]["json"]
-        assert payload["severity"] == "critical"
-        assert payload["source"] == "llm_client"
-        assert payload["message"] == "all retries exhausted"
-        assert payload["metadata"] == {"model": "local_llm"}
-
-    async def test_send_handles_http_error_gracefully(self) -> None:
-        """При HTTP-ошибке webhook не пробрасывает исключение."""
-        channel = WebhookAlertChannel(
-            url="https://hooks.example.com/alert",
-            timeout_seconds=5.0,
+        mock_tracker.log_alert.assert_called_once_with(
+            severity="critical",
+            source="llm_client",
+            message="all retries exhausted",
+            timestamp=alert.timestamp.isoformat(),
+            metadata={"model": "local_llm"},
         )
+
+    async def test_send_with_empty_metadata(self) -> None:
+        """send() корректно обрабатывает пустые метаданные."""
+        channel = LangfuseAlertChannel()
         alert = Alert(
             severity=AlertSeverity.WARNING,
-            source="test",
-            message="test alert",
+            source="src",
+            message="msg",
         )
 
-        mock_response = AsyncMock()
-        mock_response.status_code = 500
+        mock_tracker = MagicMock()
+        mock_tracker.log_alert = MagicMock()
 
-        mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client.is_closed = False
-        channel._client = mock_client
+        with patch(
+            "src.app.observability.alerts.get_langfuse_tracker",
+            return_value=mock_tracker,
+        ):
+            await channel.send(alert)
 
-        await channel.send(alert)
+        mock_tracker.log_alert.assert_called_once()
+        call_kwargs = mock_tracker.log_alert.call_args[1]
+        assert call_kwargs["metadata"] == {}
 
-        mock_client.post.assert_awaited_once()
+    async def test_send_all_severity_levels(self) -> None:
+        """send() корректно передаёт все уровни severity."""
+        channel = LangfuseAlertChannel()
 
-    async def test_send_handles_network_error_gracefully(self) -> None:
-        """При сетевой ошибке webhook не пробрасывает исключение."""
-        channel = WebhookAlertChannel(
-            url="https://hooks.example.com/alert",
-            timeout_seconds=5.0,
-        )
-        alert = Alert(
-            severity=AlertSeverity.CRITICAL,
-            source="test",
-            message="test alert",
-        )
+        for severity in AlertSeverity:
+            alert = Alert(
+                severity=severity,
+                source="test",
+                message="test",
+            )
 
-        mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.post = AsyncMock(side_effect=httpx.RequestError("connection refused"))
-        mock_client.is_closed = False
-        channel._client = mock_client
+            mock_tracker = MagicMock()
+            mock_tracker.log_alert = MagicMock()
 
-        await channel.send(alert)
+            with patch(
+                "src.app.observability.alerts.get_langfuse_tracker",
+                return_value=mock_tracker,
+            ):
+                await channel.send(alert)
 
-        mock_client.post.assert_awaited_once()
-
-    async def test_send_handles_timeout_gracefully(self) -> None:
-        """При таймауте webhook не пробрасывает исключение."""
-        channel = WebhookAlertChannel(
-            url="https://hooks.example.com/alert",
-            timeout_seconds=1.0,
-        )
-        alert = Alert(
-            severity=AlertSeverity.WARNING,
-            source="test",
-            message="timeout alert",
-        )
-
-        mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("read timed out"))
-        mock_client.is_closed = False
-        channel._client = mock_client
-
-        await channel.send(alert)
-
-        mock_client.post.assert_awaited_once()
-
-    async def test_close_calls_aclose(self) -> None:
-        """``close`` закрывает HTTP-клиент."""
-        channel = WebhookAlertChannel(
-            url="https://hooks.example.com/alert",
-            timeout_seconds=5.0,
-        )
-        mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.is_closed = False
-        mock_client.aclose = AsyncMock()
-        channel._client = mock_client
-
-        await channel.close()
-
-        mock_client.aclose.assert_awaited_once()
-        assert channel._client is None
+            call_kwargs = mock_tracker.log_alert.call_args[1]
+            assert call_kwargs["severity"] == severity.value
 
 
 class TestAlertManager:
@@ -384,26 +341,13 @@ class TestAlertManager:
 class TestConfigureAlertManager:
     """Тесты фабрики конфигурации менеджера алертов."""
 
-    def test_configure_without_webhook(self) -> None:
-        """Без webhook создаётся менеджер с одним LogAlertChannel."""
-        manager = configure_alert_manager(
-            webhook_url=None,
-            webhook_timeout=10.0,
-        )
-        assert isinstance(manager, AlertManager)
-        assert len(manager._channels) == 1
-        assert isinstance(manager._channels[0], LogAlertChannel)
-
-    def test_configure_with_webhook(self) -> None:
-        """С webhook создаётся менеджер с двумя каналами."""
-        manager = configure_alert_manager(
-            webhook_url="https://hooks.example.com/alert",
-            webhook_timeout=5.0,
-        )
+    def test_configure_creates_two_channels(self) -> None:
+        """Создаётся менеджер с LogAlertChannel и LangfuseAlertChannel."""
+        manager = configure_alert_manager()
         assert isinstance(manager, AlertManager)
         assert len(manager._channels) == 2
         assert isinstance(manager._channels[0], LogAlertChannel)
-        assert isinstance(manager._channels[1], WebhookAlertChannel)
+        assert isinstance(manager._channels[1], LangfuseAlertChannel)
 
 
 class TestGetAlertManager:
@@ -411,10 +355,7 @@ class TestGetAlertManager:
 
     def test_get_returns_configured_manager(self) -> None:
         """get_alert_manager() возвращает ранее сконфигурированный менеджер."""
-        configured = configure_alert_manager(
-            webhook_url=None,
-            webhook_timeout=10.0,
-        )
+        configured = configure_alert_manager()
         retrieved = get_alert_manager()
         assert retrieved is configured
 
@@ -425,5 +366,6 @@ class TestGetAlertManager:
         alerts_module._alert_manager = None
         manager = get_alert_manager()
         assert isinstance(manager, AlertManager)
-        assert len(manager._channels) == 1
+        assert len(manager._channels) == 2
         assert isinstance(manager._channels[0], LogAlertChannel)
+        assert isinstance(manager._channels[1], LangfuseAlertChannel)

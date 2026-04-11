@@ -95,10 +95,7 @@ def lifespan_factory(
         await set_threadpool_tokens(threadpool_tokens)
 
         try:
-            configure_alert_manager(
-                webhook_url=settings.ALERT_WEBHOOK_URL,
-                webhook_timeout=settings.ALERT_WEBHOOK_TIMEOUT,
-            )
+            configure_alert_manager()
             logger_system.info("Alert manager configured.")
 
             settings.ensure_directories()

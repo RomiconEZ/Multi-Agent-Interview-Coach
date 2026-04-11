@@ -8,18 +8,16 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 import traceback
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
-import httpx
 from pydantic import BaseModel, Field
 
 from ..core.logger_setup import get_system_logger
-from ..utils.url import mask_url
+from .langfuse_client import get_langfuse_tracker
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 
@@ -94,75 +92,29 @@ class LogAlertChannel:
         )
 
 
-class WebhookAlertChannel:
+class LangfuseAlertChannel:
     """
-    Канал алертов через HTTP webhook.
+    Канал алертов через Langfuse observability.
 
-    Отправляет POST-запрос с JSON-телом на указанный URL.
-    При сбое доставки логирует ошибку, не пробрасывает исключение.
-    Переиспользует единый ``httpx.AsyncClient`` для всех отправок,
-    чтобы избежать создания нового TCP-соединения на каждый алерт.
-
-    :param url: URL вебхука.
-    :param timeout_seconds: Таймаут HTTP-запроса.
+    Создаёт trace в Langfuse с тегами ``alert`` и уровнем severity,
+    позволяя фильтровать алерты в UI Langfuse.
+    При недоступности или отключённом Langfuse операция пропускается.
     """
-
-    def __init__(self, url: str, timeout_seconds: float) -> None:
-        self._url = url
-        self._masked_url: str = mask_url(url)
-        self._timeout = timeout_seconds
-        self._client: httpx.AsyncClient | None = None
-
-    def _get_client(self) -> httpx.AsyncClient:
-        """
-        Возвращает переиспользуемый HTTP-клиент, создавая его при необходимости.
-
-        :return: Экземпляр ``httpx.AsyncClient``.
-        """
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(self._timeout),
-            )
-        return self._client
 
     async def send(self, alert: Alert) -> None:
         """
-        Отправляет алерт на webhook.
+        Отправляет алерт в Langfuse как trace.
 
         :param alert: Алерт для отправки.
         """
-        payload: dict[str, Any] = {
-            "severity": alert.severity.value,
-            "source": alert.source,
-            "message": alert.message,
-            "timestamp": alert.timestamp.isoformat(),
-            "metadata": alert.metadata,
-        }
-        try:
-            client: httpx.AsyncClient = self._get_client()
-            response: httpx.Response = await client.post(
-                self._url,
-                json=payload,
-            )
-            if response.status_code >= 400:
-                logger.warning(
-                    f"Webhook alert delivery failed: "
-                    f"status={response.status_code}, url={self._masked_url}"
-                )
-            else:
-                logger.debug(
-                    f"Webhook alert delivered: "
-                    f"status={response.status_code}, url={self._masked_url}"
-                )
-        except httpx.RequestError as exc:
-            tb: str = traceback.format_exc().replace("\n", " | ")
-            logger.warning(f"Webhook alert delivery error: {exc} | traceback: {tb}")
-
-    async def close(self) -> None:
-        """Закрывает HTTP-клиент, освобождая ресурсы."""
-        if self._client is not None and not self._client.is_closed:
-            await self._client.aclose()
-            self._client = None
+        tracker = get_langfuse_tracker()
+        tracker.log_alert(
+            severity=alert.severity.value,
+            source=alert.source,
+            message=alert.message,
+            timestamp=alert.timestamp.isoformat(),
+            metadata=alert.metadata,
+        )
 
 
 class AlertManager:
@@ -172,29 +124,11 @@ class AlertManager:
     Рассылает алерты по всем зарегистрированным каналам.
     Гарантирует, что сбой одного канала не блокирует остальные.
 
-    :param channels: Список каналов доставки алертов.
+    :param channels: Кортеж каналов доставки алертов.
     """
 
     def __init__(self, channels: tuple[AlertChannel, ...]) -> None:
         self._channels: tuple[AlertChannel, ...] = channels
-
-    async def close(self) -> None:
-        """Закрывает все каналы, поддерживающие метод ``close``."""
-        for channel in self._channels:
-            close_fn = getattr(channel, "close", None)
-            if (
-                close_fn is not None
-                and callable(close_fn)
-                and inspect.iscoroutinefunction(close_fn)
-            ):
-                try:
-                    await close_fn()
-                except Exception as exc:
-                    tb: str = traceback.format_exc().replace("\n", " | ")
-                    logger.warning(
-                        f"Alert channel {type(channel).__name__} close failed: "
-                        f"{exc} | traceback: {tb}"
-                    )
 
     async def fire(self, alert: Alert) -> None:
         """
@@ -258,33 +192,33 @@ class AlertManager:
 _alert_manager: AlertManager | None = None
 
 
+def _create_channels() -> tuple[AlertChannel, ...]:
+    """
+    Создаёт стандартный набор каналов доставки алертов.
+
+    :return: Кортеж каналов (LogAlertChannel, LangfuseAlertChannel).
+    """
+    return (LogAlertChannel(), LangfuseAlertChannel())
+
+
 async def close_alert_manager() -> None:
     """
-    Закрывает глобальный менеджер алертов и освобождает ресурсы каналов.
+    Сбрасывает глобальный менеджер алертов.
 
     Безопасно вызывать повторно или когда менеджер не был инициализирован.
     """
     global _alert_manager
     if _alert_manager is not None:
-        await _alert_manager.close()
         _alert_manager = None
         logger.info("Alert manager closed")
 
 
-def configure_alert_manager(
-    webhook_url: str | None,
-    webhook_timeout: float,
-) -> AlertManager:
+def configure_alert_manager() -> AlertManager:
     """
-    Конфигурирует глобальный менеджер алертов на основе настроек.
+    Конфигурирует глобальный менеджер алертов.
 
-    Всегда регистрирует ``LogAlertChannel``.
-    Если задан ``webhook_url``, дополнительно регистрирует ``WebhookAlertChannel``.
-    При повторном вызове предыдущий менеджер логирует предупреждение
-    (для корректного закрытия ресурсов используйте ``close_alert_manager``).
+    Регистрирует ``LogAlertChannel`` и ``LangfuseAlertChannel``.
 
-    :param webhook_url: URL вебхука для отправки алертов (None — не использовать).
-    :param webhook_timeout: Таймаут HTTP-запроса к вебхуку в секундах.
     :return: Сконфигурированный менеджер алертов.
     """
     global _alert_manager
@@ -295,15 +229,8 @@ def configure_alert_manager(
             "call close_alert_manager() first to release previous resources"
         )
 
-    channels: list[AlertChannel] = [LogAlertChannel()]
-    if webhook_url:
-        channels.append(
-            WebhookAlertChannel(url=webhook_url, timeout_seconds=webhook_timeout)
-        )
-        masked: str = mask_url(webhook_url)
-        logger.info(f"Webhook alert channel configured: {masked}")
-
-    _alert_manager = AlertManager(channels=tuple(channels))
+    channels: tuple[AlertChannel, ...] = _create_channels()
+    _alert_manager = AlertManager(channels=channels)
     logger.info(f"Alert manager configured with {len(channels)} channel(s)")
     return _alert_manager
 
@@ -313,11 +240,11 @@ def get_alert_manager() -> AlertManager:
     Возвращает глобальный менеджер алертов.
 
     Если менеджер не был сконфигурирован, создаёт экземпляр
-    с единственным ``LogAlertChannel`` (fallback).
+    с набором каналов по умолчанию (fallback).
 
     :return: Экземпляр AlertManager.
     """
     global _alert_manager
     if _alert_manager is None:
-        _alert_manager = AlertManager(channels=(LogAlertChannel(),))
+        _alert_manager = AlertManager(channels=_create_channels())
     return _alert_manager

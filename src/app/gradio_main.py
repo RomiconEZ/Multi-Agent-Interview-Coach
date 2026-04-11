@@ -35,10 +35,7 @@ def main() -> None:
     settings = get_settings()
     settings.ensure_directories()
     setup_logging()
-    configure_alert_manager(
-        webhook_url=settings.ALERT_WEBHOOK_URL,
-        webhook_timeout=settings.ALERT_WEBHOOK_TIMEOUT,
-    )
+    configure_alert_manager()
     args = parse_args()
 
     logger.info("Multi-Agent Interview Coach")

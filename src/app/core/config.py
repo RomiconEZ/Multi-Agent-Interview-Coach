@@ -318,35 +318,6 @@ class LLMCacheSettings(_SettingsBase):
         return self
 
 
-class AlertSettings(_SettingsBase):
-    """
-    Настройки системы алертинга.
-
-    :ivar ALERT_WEBHOOK_URL: URL вебхука для отправки алертов (None — не использовать).
-    :ivar ALERT_WEBHOOK_TIMEOUT: Таймаут HTTP-запроса к вебхуку в секундах.
-    """
-
-    ALERT_WEBHOOK_URL: str | None = None
-    ALERT_WEBHOOK_TIMEOUT: float = 10.0
-
-    @field_validator("ALERT_WEBHOOK_TIMEOUT")
-    @classmethod
-    def _webhook_timeout_positive(cls, v: float) -> float:
-        """Проверяет, что таймаут вебхука положителен."""
-        if v <= 0:
-            raise ValueError("ALERT_WEBHOOK_TIMEOUT must be > 0")
-        return v
-
-    @field_validator("ALERT_WEBHOOK_URL", mode="before")
-    @classmethod
-    def _strip_webhook_url(cls, v: str | None) -> str | None:
-        """Очищает пустые строки URL вебхука."""
-        if v is None:
-            return None
-        stripped: str = v.strip()
-        return stripped if stripped else None
-
-
 class GradioUISettings(_SettingsBase):
     """
     Настройки Gradio-интерфейса.
@@ -511,7 +482,6 @@ class Settings(
     InterviewSettings,
     LangfuseSettings,
     LLMCacheSettings,
-    AlertSettings,
     GradioUISettings,
 ):
     """Итоговые настройки приложения, собранные из всех тематических классов."""
