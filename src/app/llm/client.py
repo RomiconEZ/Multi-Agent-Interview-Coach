@@ -20,6 +20,7 @@ from ..core.config import settings
 from ..core.logger_setup import get_system_logger
 from ..observability import get_langfuse_tracker
 from ..observability.alerts import get_alert_manager
+from ..utils.url import mask_url
 from .cache import LLMCacheBackend, compute_cache_key, create_llm_cache
 from .circuit_breaker import CircuitBreaker, CircuitBreakerOpen
 
@@ -106,7 +107,7 @@ class LLMClient:
         :raises LLMClientError: Если API ключ не задан.
         """
         if self._client is None or self._client.is_closed:
-            if self._api_key is None:
+            if not self._api_key:
                 raise LLMClientError(
                     "LITELLM_API_KEY is not set. Please set it in .env file."
                 )
@@ -152,7 +153,7 @@ class LLMClient:
                 await alert_mgr.fire_warning(
                     source="LLMClient.check_health",
                     message=f"LLM API readiness check failed: status={response.status_code}",
-                    metadata={"base_url": self._base_url},
+                    metadata={"base_url": mask_url(self._base_url)},
                 )
             return is_healthy
         except httpx.TimeoutException:
@@ -162,7 +163,7 @@ class LLMClient:
             await alert_mgr.fire_warning(
                 source="LLMClient.check_health",
                 message=f"LLM API readiness check timed out after {self._health_check_timeout}s",
-                metadata={"base_url": self._base_url},
+                metadata={"base_url": mask_url(self._base_url)},
             )
             return False
         except httpx.RequestError as e:
@@ -170,7 +171,7 @@ class LLMClient:
             await alert_mgr.fire_warning(
                 source="LLMClient.check_health",
                 message=f"LLM API readiness check request error: {e}",
-                metadata={"base_url": self._base_url},
+                metadata={"base_url": mask_url(self._base_url)},
             )
             return False
 

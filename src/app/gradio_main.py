@@ -33,8 +33,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Главная функция запуска."""
     settings = get_settings()
-    setup_logging()
     settings.ensure_directories()
+    setup_logging()
     configure_alert_manager(
         webhook_url=settings.ALERT_WEBHOOK_URL,
         webhook_timeout=settings.ALERT_WEBHOOK_TIMEOUT,
