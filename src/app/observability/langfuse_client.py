@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -244,6 +245,9 @@ class LangfuseTracker:
         if not self.is_enabled:
             return None
 
+        if self._client is None:
+            return None
+
         if session_id:
             self._session_metrics[session_id] = SessionMetrics()
 
@@ -254,9 +258,7 @@ class LangfuseTracker:
                 user_id=user_id,
                 metadata=metadata or {},
             )
-            logger.debug(
-                f"Langfuse trace created: name={name}, session_id={session_id}"
-            )
+            logger.debug(f"Langfuse trace created: name={name}, session_id={session_id}")
             return trace
         except Exception as e:
             logger.error(f"Failed to create trace: {e}")
@@ -542,6 +544,10 @@ class LangfuseTracker:
         """
         if not self.is_enabled:
             return
+
+        if self._client is None:
+            return
+
         try:
             self._client.trace(
                 name="alert",

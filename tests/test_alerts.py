@@ -8,11 +8,13 @@ AlertManager, фабрику configure_alert_manager, get_alert_manager.
 from __future__ import annotations
 
 import logging
+
 from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from pydantic import ValidationError
 
 from src.app.observability.alerts import (
@@ -138,9 +140,7 @@ class TestLogAlertChannel:
 
         assert any("INFO" in record.message for record in caplog.records)
 
-    async def test_send_includes_metadata(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    async def test_send_includes_metadata(self, caplog: pytest.LogCaptureFixture) -> None:
         """Метаданные включаются в лог-сообщение."""
         channel = LogAlertChannel()
         alert = Alert(

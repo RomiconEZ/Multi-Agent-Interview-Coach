@@ -272,7 +272,7 @@ def start_interview(
     dict[str, Any],
 ]:
     """Синхронная обёртка для старта интервью."""
-    return _run_async(
+    return _run_async(  # type: ignore[no-any-return]
         _start_interview_async(
             model,
             max_turns,
@@ -290,7 +290,7 @@ def start_interview(
 def add_user_message(
     message: str,
     history: list[dict[str, str | None]],
-) -> tuple[dict[str, Any], list[dict[str, str | None]], dict[str, Any], str]:
+) -> tuple[dict[str, Any], list[dict[str, str | None]], dict[str, Any], Any]:
     """
     Мгновенно добавляет сообщение пользователя в историю чата, очищает и блокирует ввод.
 
@@ -635,7 +635,7 @@ async def reset_interview() -> tuple[
     )
 
 
-def refresh_models() -> gr.update:
+def refresh_models() -> dict[str, Any]:
     """
     Обновляет список моделей из LiteLLM API.
 
@@ -1041,7 +1041,7 @@ def create_gradio_interface() -> gr.Blocks:
             outputs=all_outputs,
         )
 
-    return app
+    return app  # type: ignore[no-any-return]
 
 
 def launch_app(

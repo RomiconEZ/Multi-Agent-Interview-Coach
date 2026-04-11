@@ -107,7 +107,7 @@ class InterviewerAgent(BaseAgent):
         )
         return response.strip()
 
-    async def process(
+    async def process(  # type: ignore[override]
         self,
         state: InterviewState,
         analysis: ObserverAnalysis,

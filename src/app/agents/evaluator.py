@@ -202,8 +202,8 @@ class EvaluatorAgent(BaseAgent):
         if state.knowledge_gaps:
             lines.append("Выявленные пробелы:")
             for gap in state.knowledge_gaps:
-                topic: str = gap.get("topic", "неизвестно")
-                answer: str = gap.get("correct_answer", "")
+                topic: str = gap.get("topic") or "неизвестно"
+                answer: str = gap.get("correct_answer") or ""
                 lines.append(f"  ❌ {topic}")
                 if answer:
                     lines.append(f"     Правильный ответ: {answer}")

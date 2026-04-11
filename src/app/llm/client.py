@@ -11,9 +11,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+
 from typing import Any
 
 import httpx
+
 from langfuse.client import StatefulTraceClient
 
 from ..core.config import settings
@@ -192,9 +194,11 @@ class LLMClient:
         :param attempt: Номер текущей попытки (0-based).
         :return: Задержка в секундах.
         """
-        return min(
-            self._retry_backoff_base * (2**attempt),
-            self._retry_backoff_max,
+        return float(
+            min(
+                self._retry_backoff_base * (2**attempt),
+                self._retry_backoff_max,
+            )
         )
 
     @staticmethod
@@ -414,9 +418,7 @@ class LLMClient:
                     generation=generation,
                     error=f"HTTP error {status_code}: {response_body}",
                 )
-                raise LLMClientError(
-                    f"HTTP error {status_code}: {response_body}"
-                ) from e
+                raise LLMClientError(f"HTTP error {status_code}: {response_body}") from e
 
             except httpx.TimeoutException as e:
                 last_error = e
@@ -501,7 +503,8 @@ class LLMClient:
         cleaned = cleaned.strip()
 
         try:
-            return json.loads(cleaned)
+            result: dict[str, Any] = json.loads(cleaned)
+            return result
         except json.JSONDecodeError:
             pass
 
@@ -509,7 +512,8 @@ class LLMClient:
         end: int = cleaned.rfind("}")
         if start != -1 and end > start:
             try:
-                return json.loads(cleaned[start : end + 1])
+                inner_result: dict[str, Any] = json.loads(cleaned[start : end + 1])
+                return inner_result
             except json.JSONDecodeError:
                 pass
 

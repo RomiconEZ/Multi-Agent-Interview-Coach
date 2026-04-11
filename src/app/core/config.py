@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -239,9 +240,7 @@ class InterviewSettings(_SettingsBase):
     :ivar GREETING_MAX_TOKENS: Максимальное количество токенов для генерации приветствия.
     """
 
-    INTERVIEW_LOG_DIR: Path = Field(
-        default_factory=lambda: Path.cwd() / "interview_logs"
-    )
+    INTERVIEW_LOG_DIR: Path = Field(default_factory=lambda: Path.cwd() / "interview_logs")
     TEAM_NAME: str = "Interview Coach Team"
     MAX_TURNS: int = 20
     HISTORY_WINDOW_TURNS: int = 10

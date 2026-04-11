@@ -13,6 +13,7 @@ import json
 import logging
 import time
 import traceback
+
 from typing import Protocol, runtime_checkable
 
 import redis.asyncio as aioredis
@@ -114,6 +115,7 @@ class RedisLLMCache:
                 socket_connect_timeout=5,
                 socket_timeout=5,
             )
+            assert client is not None
             await client.ping()
             self._client = client
             self._last_connection_failure = 0.0

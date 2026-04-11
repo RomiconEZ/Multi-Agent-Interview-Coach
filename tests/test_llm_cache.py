@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import time
+
 from unittest.mock import AsyncMock, patch
 
 from src.app.llm.cache import (

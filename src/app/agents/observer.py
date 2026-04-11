@@ -44,7 +44,7 @@ class ObserverAgent(BaseAgent):
         """Возвращает системный промпт."""
         return OBSERVER_SYSTEM_PROMPT
 
-    async def process(
+    async def process(  # type: ignore[override]
         self,
         state: InterviewState,
         user_message: str,
