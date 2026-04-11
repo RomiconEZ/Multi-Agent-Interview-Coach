@@ -350,12 +350,19 @@ docker compose up --build
 
 ### 3) Доступные сервисы (по умолчанию)
 
-- **Gradio UI**: `http://localhost:${GRADIO_PORT}`
-- **Nginx** (проксирует FastAPI backend): `http://localhost:${NGINX_EXTERNAL_PORT}`
-- **FastAPI backend**: внутри сети compose (контейнер `backend`, порт `${BACKEND_PORT}`).
-- **Redis**: внутри сети compose (контейнер `redis_cache`).
-- **Langfuse UI**: `http://localhost:${LANGFUSE_PORT:-3000}`
-- **Langfuse DB (PostgreSQL)**: внутри сети compose (контейнер `langfuse-db`).
+| Сервис | Адрес | Описание |
+|--------|-------|----------|
+| **Gradio UI** | [http://localhost:7860](http://localhost:7860) | Веб-интерфейс для проведения интервью |
+| **Nginx → FastAPI** | [http://localhost:90](http://localhost:90) | Проксирует запросы к FastAPI backend |
+| **FastAPI docs** | [http://localhost:90/docs](http://localhost:90/docs) | Swagger UI (OpenAPI документация) |
+| **FastAPI redoc** | [http://localhost:90/redoc](http://localhost:90/redoc) | ReDoc (альтернативная документация) |
+| **Langfuse UI** | [http://localhost:3000](http://localhost:3000) | Observability: трейсы, метрики, LLM-вызовы |
+| **FastAPI backend** | `backend:8000` (внутри сети compose) | Не доступен извне напрямую |
+| **Redis** | `redis_cache:6379` (внутри сети compose) | Кэш, не доступен извне |
+| **Langfuse DB** | `langfuse-db:5432` (внутри сети compose) | PostgreSQL, не доступен извне |
+
+> Порты настраиваются через переменные окружения в `.env`:
+> `GRADIO_PORT`, `NGINX_EXTERNAL_PORT`, `BACKEND_PORT`, `LANGFUSE_PORT`.
 
 ---
 
