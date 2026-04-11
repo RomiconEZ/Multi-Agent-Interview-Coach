@@ -5,6 +5,13 @@
 и гибкий парсер ответов LLM.
 """
 
+from .cache import (
+    LLMCacheBackend,
+    NullLLMCache,
+    RedisLLMCache,
+    compute_cache_key,
+    create_llm_cache,
+)
 from .client import LLMClient, LLMClientError, create_llm_client
 from .models import (
     fetch_available_models,
@@ -17,12 +24,17 @@ from .response_parser import (
 )
 
 __all__ = [
+    "LLMCacheBackend",
     "LLMClient",
     "LLMClientError",
+    "NullLLMCache",
+    "RedisLLMCache",
+    "compute_cache_key",
+    "create_llm_cache",
     "create_llm_client",
+    "extract_json_from_llm_response",
+    "extract_reasoning_from_llm_response",
     "fetch_available_models",
     "fetch_available_models_sync",
     "get_models_for_ui",
-    "extract_json_from_llm_response",
-    "extract_reasoning_from_llm_response",
 ]

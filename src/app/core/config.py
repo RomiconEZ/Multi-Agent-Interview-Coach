@@ -291,6 +291,55 @@ class LangfuseSettings(_SettingsBase):
         return v.strip().rstrip("/") if v else "http://localhost:3000"
 
 
+class LLMCacheSettings(_SettingsBase):
+    """
+    Настройки кэширования LLM-ответов.
+
+    :ivar LLM_CACHE_ENABLED: Включить/выключить кэширование ответов LLM.
+    :ivar LLM_CACHE_TTL_SECONDS: Время жизни кэшированного ответа в секундах.
+    """
+
+    LLM_CACHE_ENABLED: bool = False
+    LLM_CACHE_TTL_SECONDS: int = 3600
+
+    @field_validator("LLM_CACHE_TTL_SECONDS")
+    @classmethod
+    def _ttl_positive(cls, v: int) -> int:
+        """Проверяет, что TTL кэша положителен."""
+        if v < 1:
+            raise ValueError("LLM_CACHE_TTL_SECONDS must be >= 1")
+        return v
+
+
+class AlertSettings(_SettingsBase):
+    """
+    Настройки системы алертинга.
+
+    :ivar ALERT_WEBHOOK_URL: URL вебхука для отправки алертов (None — не использовать).
+    :ivar ALERT_WEBHOOK_TIMEOUT: Таймаут HTTP-запроса к вебхуку в секундах.
+    """
+
+    ALERT_WEBHOOK_URL: str | None = None
+    ALERT_WEBHOOK_TIMEOUT: float = 10.0
+
+    @field_validator("ALERT_WEBHOOK_TIMEOUT")
+    @classmethod
+    def _webhook_timeout_positive(cls, v: float) -> float:
+        """Проверяет, что таймаут вебхука положителен."""
+        if v <= 0:
+            raise ValueError("ALERT_WEBHOOK_TIMEOUT must be > 0")
+        return v
+
+    @field_validator("ALERT_WEBHOOK_URL", mode="before")
+    @classmethod
+    def _strip_webhook_url(cls, v: str | None) -> str | None:
+        """Очищает пустые строки URL вебхука."""
+        if v is None:
+            return None
+        stripped: str = v.strip()
+        return stripped if stripped else None
+
+
 class GradioUISettings(_SettingsBase):
     """
     Настройки Gradio-интерфейса.
@@ -433,6 +482,8 @@ class Settings(
     LiteLLMSettings,
     InterviewSettings,
     LangfuseSettings,
+    LLMCacheSettings,
+    AlertSettings,
     GradioUISettings,
 ):
     pass

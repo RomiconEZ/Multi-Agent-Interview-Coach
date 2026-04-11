@@ -1,0 +1,224 @@
+# =============================================================================
+# CI/CD Pipeline — Multi-Agent Interview Coach
+# =============================================================================
+# Triggers on push/PR to main and develop branches.
+# Jobs: lint, type-check, test (with coverage), security scan.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Cancel redundant runs for the same branch / PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+# ---------------------------------------------------------------------------
+# Shared environment variables
+# ---------------------------------------------------------------------------
+env:
+  PYTHON_VERSION: "3.11"
+  POETRY_VERSION: "1.8.3"
+  # Keep the virtualenv inside the project so it can be cached easily
+  POETRY_VIRTUALENVS_IN_PROJECT: "true"
+  # Disable interactive prompts from Poetry
+  POETRY_NO_INTERACTION: "1"
+
+# ---------------------------------------------------------------------------
+# Jobs
+# ---------------------------------------------------------------------------
+jobs:
+  # =========================================================================
+  # 1. Lint — black, isort, flake8
+  # =========================================================================
+  lint:
+    name: "Lint (black / isort / flake8)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: |
+          pipx install poetry==${{ env.POETRY_VERSION }}
+
+      # Cache the Poetry virtualenv based on the lock file hash
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-lint-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            venv-lint-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+
+      - name: Install dependencies
+        run: poetry install --only dev --no-root
+
+      # ---- Linting steps --------------------------------------------------
+      - name: Run black (formatting check)
+        run: poetry run black --check --diff src/ tests/
+
+      - name: Run isort (import order check)
+        run: poetry run isort --check-only --diff src/ tests/
+
+      - name: Run flake8 (style & complexity)
+        run: poetry run flake8 src/ tests/
+
+  # =========================================================================
+  # 2. Type-check — mypy  (runs in parallel with lint)
+  # =========================================================================
+  type-check:
+    name: "Type-check (mypy)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: |
+          pipx install poetry==${{ env.POETRY_VERSION }}
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-typecheck-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            venv-typecheck-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      # Cache mypy's incremental analysis data
+      - name: Cache mypy cache
+        uses: actions/cache@v4
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('poetry.lock') }}-${{ hashFiles('src/**/*.py') }}
+          restore-keys: |
+            mypy-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('poetry.lock') }}-
+            mypy-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+
+      - name: Run mypy
+        run: poetry run mypy src/
+
+  # =========================================================================
+  # 3. Test — pytest + coverage  (depends on lint passing)
+  # =========================================================================
+  test:
+    name: "Test (pytest) — Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [lint]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        run: |
+          pipx install poetry==${{ env.POETRY_VERSION }}
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-test-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            venv-test-${{ runner.os }}-py${{ matrix.python-version }}-
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      # ---- Test execution --------------------------------------------------
+      - name: Run tests with coverage
+        run: |
+          poetry run pytest tests/ \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov \
+            -ra -q
+
+      # ---- Artifacts -------------------------------------------------------
+      - name: Upload coverage XML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-py${{ matrix.python-version }}
+          path: coverage.xml
+          retention-days: 14
+
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-py${{ matrix.python-version }}
+          path: htmlcov/
+          retention-days: 14
+
+  # =========================================================================
+  # 4. Security — safety check on dependencies
+  # =========================================================================
+  security:
+    name: "Security (safety)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: |
+          pipx install poetry==${{ env.POETRY_VERSION }}
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-security-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('poetry.lock') }}
+          restore-keys: |
+            venv-security-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+
+      - name: Install dependencies
+        run: poetry install --only dev --no-root
+
+      - name: Export requirements and run safety
+        run: |
+          poetry export --without-hashes -f requirements.txt -o requirements.txt
+          poetry run safety check -r requirements.txt --full-report

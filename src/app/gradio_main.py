@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import argparse
 
+from .core.config import settings
 from .core.logger_setup import setup_logging
+from .observability.alerts import configure_alert_manager
 from .ui import launch_app
 
 
@@ -29,6 +31,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Главная функция запуска."""
     setup_logging()
+    configure_alert_manager(
+        webhook_url=settings.ALERT_WEBHOOK_URL,
+        webhook_timeout=settings.ALERT_WEBHOOK_TIMEOUT,
+    )
     args = parse_args()
 
     print(f"\n{'=' * 60}")

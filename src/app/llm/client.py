@@ -3,6 +3,7 @@
 
 Предоставляет унифицированный интерфейс для работы с различными LLM через LiteLLM прокси.
 Включает механизмы защиты: circuit breaker, health check, retry с exponential backoff.
+Поддерживает кэширование ответов и алертинг при критических сбоях.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ from langfuse.client import StatefulTraceClient
 from ..core.config import settings
 from ..core.logger_setup import get_system_logger
 from ..observability import get_langfuse_tracker
+from ..observability.alerts import get_alert_manager
+from .cache import LLMCacheBackend, compute_cache_key, create_llm_cache
 from .circuit_breaker import CircuitBreaker, CircuitBreakerOpen
 
 logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
@@ -54,6 +57,8 @@ class LLMClient:
         retry_backoff_max: float,
         health_check_timeout: float,
         circuit_breaker: CircuitBreaker,
+        cache: LLMCacheBackend,
+        cache_ttl_seconds: int,
     ) -> None:
         self._base_url = base_url
         self._model = model
@@ -64,6 +69,8 @@ class LLMClient:
         self._retry_backoff_max = retry_backoff_max
         self._health_check_timeout = health_check_timeout
         self._circuit_breaker = circuit_breaker
+        self._cache = cache
+        self._cache_ttl_seconds = cache_ttl_seconds
         self._client: httpx.AsyncClient | None = None
         self._langfuse = get_langfuse_tracker()
         self._current_trace: StatefulTraceClient | None = None
@@ -139,21 +146,40 @@ class LLMClient:
                 logger.warning(
                     f"LLM API readiness check failed: status={response.status_code}"
                 )
+                alert_mgr = get_alert_manager()
+                await alert_mgr.fire_warning(
+                    source="LLMClient.check_health",
+                    message=f"LLM API readiness check failed: status={response.status_code}",
+                    metadata={"base_url": self._base_url},
+                )
             return is_healthy
         except httpx.TimeoutException:
             logger.warning(
                 f"LLM API readiness check timed out after {self._health_check_timeout}s"
             )
+            alert_mgr = get_alert_manager()
+            await alert_mgr.fire_warning(
+                source="LLMClient.check_health",
+                message=f"LLM API readiness check timed out after {self._health_check_timeout}s",
+                metadata={"base_url": self._base_url},
+            )
             return False
         except httpx.RequestError as e:
             logger.warning(f"LLM API readiness check failed: {e}")
+            alert_mgr = get_alert_manager()
+            await alert_mgr.fire_warning(
+                source="LLMClient.check_health",
+                message=f"LLM API readiness check request error: {e}",
+                metadata={"base_url": self._base_url},
+            )
             return False
 
     async def close(self) -> None:
-        """Закрывает HTTP клиент."""
+        """Закрывает HTTP клиент и кэш."""
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
+        await self._cache.close()
 
     def _compute_retry_delay(self, attempt: int) -> float:
         """
@@ -212,6 +238,10 @@ class LLMClient:
         """
         Выполняет запрос к LLM.
 
+        Перед обращением к LLM проверяет кэш. При cache hit возвращает
+        кэшированный ответ без обращения к сети. При cache miss выполняет
+        обычный запрос и сохраняет результат в кэш.
+
         :param messages: Список сообщений.
         :param temperature: Температура генерации.
         :param max_tokens: Максимальное число токенов.
@@ -220,12 +250,55 @@ class LLMClient:
         :return: Ответ модели.
         :raises LLMClientError: При ошибке запроса или срабатывании circuit breaker.
         """
+        # ── Проверка кэша ────────────────────────────────────────────────
+        cache_key: str = compute_cache_key(
+            self._model,
+            messages,
+            temperature,
+            max_tokens,
+            json_mode,
+        )
+        cached_response: str | None = await self._cache.get(cache_key)
+        if cached_response is not None:
+            logger.info(
+                f"LLM cache hit for {generation_name}, "
+                f"model={self._model}, key={cache_key[:16]}..."
+            )
+            generation = self._langfuse.create_generation(
+                trace=self._current_trace,
+                name=generation_name,
+                model=self._model,
+                input_messages=messages,
+                metadata={
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "json_mode": json_mode,
+                    "cached": True,
+                },
+            )
+            self._langfuse.end_generation(
+                generation=generation,
+                output=cached_response,
+                cost_usd=0.0,
+                usage={"input": 0, "output": 0, "total": 0},
+                session_id=self._session_id,
+                generation_name=generation_name,
+            )
+            return cached_response
+
+        # ── Обычный LLM-вызов ────────────────────────────────────────────
         client = await self._get_client()
 
         # Проверяем circuit breaker перед выполнением запроса
         try:
             self._circuit_breaker.check()
         except CircuitBreakerOpen as e:
+            alert_mgr = get_alert_manager()
+            await alert_mgr.fire_critical(
+                source="LLMClient",
+                message=f"Circuit breaker is OPEN, request rejected: {e}",
+                metadata={"model": self._model, "generation": generation_name},
+            )
             raise LLMClientError(str(e)) from e
 
         payload: dict[str, Any] = {
@@ -298,6 +371,14 @@ class LLMClient:
                     f"LLM response received, length={len(content)}, "
                     f"usage={usage_dict}, cost=${response_cost:.6f}"
                 )
+
+                # ── Сохранение в кэш ─────────────────────────────────────
+                await self._cache.set(
+                    cache_key,
+                    content,
+                    self._cache_ttl_seconds,
+                )
+
                 return content
 
             except httpx.HTTPStatusError as e:
@@ -363,6 +444,20 @@ class LLMClient:
             generation=generation,
             error=error_msg,
         )
+
+        # Алерт о полном исчерпании retry
+        alert_mgr = get_alert_manager()
+        await alert_mgr.fire_warning(
+            source="LLMClient",
+            message=f"All retries exhausted for {generation_name}: {error_msg}",
+            metadata={
+                "model": self._model,
+                "generation": generation_name,
+                "max_retries": self._max_retries,
+                "circuit_breaker_failures": self._circuit_breaker.failure_count,
+            },
+        )
+
         raise LLMClientError(error_msg)
 
     @staticmethod
@@ -480,6 +575,27 @@ def _get_shared_circuit_breaker() -> CircuitBreaker:
     return _shared_circuit_breaker
 
 
+_shared_cache: LLMCacheBackend | None = None
+
+
+def _get_shared_cache() -> LLMCacheBackend:
+    """
+    Возвращает разделяемый экземпляр кэша LLM-ответов.
+
+    Singleton гарантирует единое подключение к Redis для всех
+    ``LLMClient`` экземпляров в процессе.
+
+    :return: Экземпляр LLMCacheBackend.
+    """
+    global _shared_cache
+    if _shared_cache is None:
+        _shared_cache = create_llm_cache(
+            enabled=settings.LLM_CACHE_ENABLED,
+            redis_url=settings.REDIS_CACHE_URL,
+        )
+    return _shared_cache
+
+
 def create_llm_client(model: str | None = None) -> LLMClient:
     """
     Создаёт экземпляр LLM клиента с настройками из конфигурации.
@@ -497,4 +613,6 @@ def create_llm_client(model: str | None = None) -> LLMClient:
         retry_backoff_max=settings.LITELLM_RETRY_BACKOFF_MAX,
         health_check_timeout=settings.LITELLM_HEALTH_CHECK_TIMEOUT,
         circuit_breaker=_get_shared_circuit_breaker(),
+        cache=_get_shared_cache(),
+        cache_ttl_seconds=settings.LLM_CACHE_TTL_SECONDS,
     )

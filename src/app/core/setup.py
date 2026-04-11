@@ -6,13 +6,13 @@ from typing import Any
 import anyio
 import fastapi
 import redis.asyncio as redis
-
 from fastapi import APIRouter, FastAPI
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
 from ..middleware.client_cache_middleware import ClientCacheMiddleware
 from ..observability import get_langfuse_tracker
+from ..observability.alerts import configure_alert_manager
 from ..utils import cache
 from .config import Settings
 from .logger_setup import get_system_logger
@@ -90,6 +90,12 @@ def lifespan_factory(
         redis_cache_created = False
 
         await set_threadpool_tokens(threadpool_tokens)
+
+        configure_alert_manager(
+            webhook_url=settings.ALERT_WEBHOOK_URL,
+            webhook_timeout=settings.ALERT_WEBHOOK_TIMEOUT,
+        )
+        logger_system.info("Alert manager configured.")
 
         try:
             await create_redis_cache_pool(settings.REDIS_CACHE_URL)
