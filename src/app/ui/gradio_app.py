@@ -211,15 +211,17 @@ async def start_interview(
     )
 
 
-def start_interview_prepare() -> tuple[
-    str,
-    dict[str, Any],
-    list[dict[str, str | None]],
-    str,
-    None,
-    None,
-    dict[str, Any],
-]:
+def start_interview_prepare() -> (
+    tuple[
+        str,
+        dict[str, Any],
+        list[dict[str, str | None]],
+        str,
+        None,
+        None,
+        dict[str, Any],
+    ]
+):
     """
     Мгновенно обновляет UI при нажатии «Начать интервью».
 
