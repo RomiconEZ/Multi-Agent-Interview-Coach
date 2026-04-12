@@ -43,7 +43,7 @@
 - Диапазоны: `REDIS_CACHE_PORT` ∈ [1, 65535], `APP_TZ_OFFSET` ∈ [-12, 14], `MAX_TURNS` ≥ 1, etc.
 - Непустые строки: `REDIS_CACHE_HOST`, `LITELLM_BASE_URL`.
 - Положительные значения: все timeout'ы, retry counts, backoff values.
-- Автоматическое создание директорий: `APP_LOG_DIR` и `INTERVIEW_LOG_DIR` создаются при валидации через `resolve() + mkdir(parents=True, exist_ok=True)`.
+- Нормализация путей: валидаторы `APP_LOG_DIR` и `INTERVIEW_LOG_DIR` вызывают только `resolve()` для приведения к абсолютному пути. Фактическое создание директорий (`mkdir(parents=True, exist_ok=True)`) происходит в отдельном методе `ensure_directories()`, а не во время валидации.
 - Нормализация URL: `LITELLM_BASE_URL` и `LANGFUSE_HOST` — strip + rstrip("/").
 
 ### 2.3 Загрузка
@@ -64,7 +64,7 @@ model_config = SettingsConfigDict(
 
 ### 2.4 Singleton
 
-Экземпляр `settings = Settings()` создаётся на уровне модуля при первом импорте `config.py`. Все остальные модули импортируют `settings` из `core.config`.
+Экземпляр `Settings` создаётся лениво через функцию `get_settings()` с double-checked locking (проверка → блокировка → повторная проверка). Модуль `config.py` предоставляет атрибут `settings` через `__getattr__`-прокси, который при обращении вызывает `get_settings()`. Таким образом, экземпляр создаётся при первом доступе к `settings`, а не в момент импорта модуля. Все остальные модули импортируют `settings` из `core.config`.
 
 ---
 
@@ -136,7 +136,7 @@ Shutdown:
 
 | Сервис | Образ | Порт | Зависимости |
 |---|---|---|---|
-| `interview-coach` | `Dockerfile.gradio` | `${GRADIO_PORT:-7860}` | `langfuse` |
+| `interview-coach` | `Dockerfile.gradio` | `${GRADIO_PORT:-7860}` | `redis_cache`, `langfuse` |
 | `backend` | `Dockerfile` | `${BACKEND_PORT}` (internal) | `redis_cache`, `langfuse` |
 | `redis_cache` | `redis:alpine` | `${REDIS_CACHE_PORT}` (internal) | — |
 | `nginx` | `nginx:latest` | `${NGINX_EXTERNAL_PORT}` | `backend` |
@@ -260,7 +260,7 @@ LiteLLM proxy принимает `model` из payload запроса и марш
 | Переменная | Тип | Default | Описание |
 |---|---|---|---|
 | `LITELLM_BASE_URL` | str | `http://localhost:4000` | Базовый URL LiteLLM proxy |
-| `LITELLM_API_KEY` | str | `""` | API ключ |
+| `LITELLM_API_KEY` | str \| None | `None` | API ключ |
 | `LITELLM_MODEL` | str | `local_llm` | Модель по умолчанию |
 | `LITELLM_TIMEOUT` | int | `120` | Таймаут запросов (секунды) |
 | `LITELLM_MAX_RETRIES` | int | `3` | Максимум повторных попыток |
@@ -293,8 +293,8 @@ LiteLLM proxy принимает `model` из payload запроса и марш
 | Переменная | Тип | Default | Описание |
 |---|---|---|---|
 | `LANGFUSE_ENABLED` | bool | `true` | Включить трекинг |
-| `LANGFUSE_PUBLIC_KEY` | str | `""` | Публичный ключ |
-| `LANGFUSE_SECRET_KEY` | str | `""` | Секретный ключ |
+| `LANGFUSE_PUBLIC_KEY` | str \| None | `None` | Публичный ключ |
+| `LANGFUSE_SECRET_KEY` | str \| None | `None` | Секретный ключ |
 | `LANGFUSE_HOST` | str | `http://localhost:3000` | URL хоста Langfuse |
 
 ### Приложение

@@ -123,7 +123,7 @@
 | Сообщение кандидата | `user_message` в `<user_input>` | ~20–500 токенов |
 | Задача | Фиксированный блок | ~100 токенов |
 | **Итого (вход)** | | **~4 000–5 200 токенов** |
-| **max_tokens (выход)** | `config.observer.max_tokens` | **4 000 токенов** (default) |
+| **max_tokens (выход)** | `config.observer.max_tokens` | **4 096 токенов** (default) |
 
 **Стратегия ограничения**: обрезка истории до 5 ходов и 100 символов на реплику в `_summarize_history()`.
 
@@ -141,7 +141,7 @@
 | Инструкция | `_get_response_instruction()` | ~50–200 токенов |
 | **История диалога** | `get_conversation_history(HISTORY_WINDOW_TURNS)` | **~1 000–4 000 токенов** |
 | **Итого (вход)** | | **~4 000–8 300 токенов** |
-| **max_tokens (выход)** | `config.interviewer.max_tokens` | **2 000 токенов** (default) |
+| **max_tokens (выход)** | `config.interviewer.max_tokens` | **4 096 токенов** (default) |
 
 **Стратегия ограничения**: `HISTORY_WINDOW_TURNS` (default: 10) — передаются только последние N ходов полностью. Более ранние ходы отбрасываются.
 
@@ -157,7 +157,7 @@
 | Skills summary | confirmed_skills + knowledge_gaps + covered_topics | ~100–500 токенов |
 | Инструкция и критерии | Фиксированный блок | ~200 токенов |
 | **Итого (вход)** | | **~5 000–14 000 токенов** |
-| **max_tokens (выход)** | `config.evaluator.max_tokens` | **8 000 токенов** (default) |
+| **max_tokens (выход)** | `config.evaluator.max_tokens` | **4 096 токенов** (default) |
 
 **Стратегия ограничения**: нет ограничения на историю (все ходы передаются). Ограничение — через `MAX_TURNS` (default: 20) и `max_tokens` на выход. При очень длинных сессиях (>20 ходов с развёрнутыми ответами) возможно исчерпание контекстного окна модели.
 
@@ -251,13 +251,13 @@ self._update_state_from_analysis(analysis, user_message)
 | `HISTORY_WINDOW_TURNS` | 10 | ≥ 1 | Количество ходов в контексте Interviewer |
 | `GREETING_MAX_TOKENS` | 300 | ≥ 1 | Максимум токенов для приветствия |
 | `observer.temperature` | 0.3 | 0.0–2.0 | Температура Observer (низкая → детерминированный анализ) |
-| `observer.max_tokens` | 4000 | 64–8192 | Максимум токенов на выход Observer |
+| `observer.max_tokens` | 4096 | 64–8192 | Максимум токенов на выход Observer |
 | `observer.generation_retries` | 2 | 0–10 | Повторы при ошибке парсинга JSON |
 | `interviewer.temperature` | 0.7 | 0.0–2.0 | Температура Interviewer (средняя → разнообразие вопросов) |
-| `interviewer.max_tokens` | 2000 | 64–8192 | Максимум токенов на выход Interviewer |
+| `interviewer.max_tokens` | 4096 | 64–8192 | Максимум токенов на выход Interviewer |
 | `interviewer.generation_retries` | 0 | 0–10 | Interviewer не использует retry (текстовый вывод) |
 | `evaluator.temperature` | 0.3 | 0.0–2.0 | Температура Evaluator (низкая → структурированный фидбэк) |
-| `evaluator.max_tokens` | 8000 | 64–8192 | Максимум токенов на выход Evaluator |
+| `evaluator.max_tokens` | 4096 | 64–8192 | Максимум токенов на выход Evaluator |
 | `evaluator.generation_retries` | 2 | 0–10 | Повторы при ошибке парсинга JSON |
 
 ### 6.2 Модели конфигурации

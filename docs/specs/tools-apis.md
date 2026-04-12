@@ -231,7 +231,11 @@ Retry применяется к HTTP кодам из `_RETRYABLE_HTTP_CODES` и 
 
 ### 3.2 Использование
 
-Redis используется исключительно в контексте FastAPI backend (`src/app/utils/cache.py`). Gradio UI не использует Redis напрямую.
+Redis используется в двух независимых контекстах:
+
+1. **General-purpose cache** — `src/app/utils/cache.py`. Используется FastAPI backend для кэширования произвольных данных. Connection pool создаётся в lifespan FastAPI, закрывается при shutdown.
+
+2. **LLM response cache** — `src/app/llm/cache.py` (`RedisLLMCache` / `NullLLMCache`). Используется `LLMClient` для кэширования ответов LLM как в Gradio UI, так и в FastAPI backend процессах. Ключ кэша — SHA-256 от параметров запроса (model, messages, temperature, max_tokens, json_mode). Подключение ленивое (lazy connection при первом обращении). При недоступности Redis деградирует gracefully — переключается на `NullLLMCache` (no-op), запросы идут напрямую к LLM без кэширования. TTL настраивается через `LLM_CACHE_TTL_SECONDS`.
 
 ### 3.3 Обработка ошибок
 

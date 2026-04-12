@@ -133,11 +133,13 @@ InterviewSession                    LLMClient
 
 **Маршрутизация по `generation_name`:**
 
-| Prefix в generation_name | Целевой агент |
+Используется проверка вхождения подстроки (`"observer" in name_lower`), а не префикс.
+
+| Подстрока в generation_name | Целевой агент |
 |---|---|
-| `observer_*` | `observer_usage`, `observer_calls` |
-| `interviewer_*` | `interviewer_usage`, `interviewer_calls` |
-| `evaluator_*` | `evaluator_usage`, `evaluator_calls` |
+| `"observer" in name_lower` | `observer_usage`, `observer_calls` |
+| `"interviewer" in name_lower` | `interviewer_usage`, `interviewer_calls` |
+| `"evaluator" in name_lower` | `evaluator_usage`, `evaluator_calls` |
 
 ### 4.3 TokenUsage
 
@@ -338,7 +340,7 @@ Trace: interview_session
     "total_turns": 10,
     "final_difficulty": "INTERMEDIATE",
     "confirmed_skills": ["Python basics", "HTTP"],
-    "knowledge_gaps": [{"topic": "GIL", "correct_answer": "..."}],
+    "knowledge_gaps": [{"topic": "GIL", "user_answer": "...", "correct_answer": "..."}],
     "covered_topics": ["Python", "HTTP", "REST"]
   },
   "turns": [

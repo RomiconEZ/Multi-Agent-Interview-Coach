@@ -16,7 +16,7 @@
 | LLM-вызовов на ход | 2 (Observer + Interviewer) | `InterviewSession.process_message()` |
 | LLM-вызовов на стоп-команду | 1 (Observer распознаёт STOP_COMMAND) | `ObserverAgent.process()` |
 | LLM-вызовов на фидбэк | 1 (Evaluator) | `InterviewSession.generate_feedback()` |
-| **Всего LLM-вызовов на сессию** | **2N + 3** (при N ходах: 19–43) | Формула: 1 (greeting) + 2×N (ходы) + 1 (stop observer) + 1 (evaluator) |
+| **Всего LLM-вызовов на сессию** | **2N + 2** до **2N + 3** (при N ходах: 18–43) | Формула: 1 (greeting) + 2×N (ходы) + 1 (evaluator) + 0–1 (stop observer, только при текстовой стоп-команде) |
 | Средний расход токенов на сессию | 50 000–80 000 | Оценка: ~2 500–4 000 токенов на LLM-вызов |
 | Средний расход токенов на Evaluator | 5 000–8 000 | Полная история + развёрнутый фидбэк |
 | Размер JSON-логов на сессию | 50–200 КБ | `interview_log_*.json` + `interview_detailed_*.json` |
@@ -57,7 +57,7 @@
 | Small team | 1 vCPU | 512 МБ–1 ГБ | Gradio single-process — bottleneck при >5 concurrent users |
 | Production | 2–4 vCPU | 1–2 ГБ | Требуется горизонтальное масштабирование (несколько реплик) |
 
-> **Ключевое ограничение**: Gradio UI работает в single-process режиме. `InterviewState` хранится in-memory в глобальной переменной `_current_session`. Это означает, что один экземпляр контейнера обслуживает **одного пользователя** в каждый момент времени. Для concurrent users необходимы отдельные реплики.
+> **Ключевое ограничение**: Gradio UI работает в single-process режиме. `InterviewSession` (содержащий `InterviewState`) хранится in-memory в глобальной переменной `_current_session`. Это означает, что один экземпляр контейнера обслуживает **одного пользователя** в каждый момент времени. Для concurrent users необходимы отдельные реплики.
 
 #### Контейнер `backend` (FastAPI)
 
@@ -178,7 +178,7 @@ flowchart LR
 
 #### 🔴 Single-Process Gradio (критическое)
 
-**Проблема**: Gradio UI работает в одном процессе. `InterviewState` хранится в глобальной переменной `_current_session`. Два пользователя не могут проводить интервью одновременно в одном контейнере.
+**Проблема**: Gradio UI работает в одном процессе. `InterviewSession` (содержащий `InterviewState` и агентов) хранится в глобальной переменной `_current_session`. Два пользователя не могут проводить интервью одновременно в одном контейнере.
 
 **Митигация**:
 - Dev / Demo: ограничение на 1 пользователя (достаточно).
