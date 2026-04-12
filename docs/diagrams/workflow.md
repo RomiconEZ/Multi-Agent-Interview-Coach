@@ -209,7 +209,7 @@ flowchart TD
     G -->|Нет| G4["circuit_breaker.record_failure()<br/><i>(только 500–504, timeout,<br/>request error; НЕ 429)</i>"]
     G4 --> G5[/"raise LLMClientError<br/>Max retries exceeded"/]
 
-    D1 -->|4xx (не 429)| H["end_generation_with_error()"]
+    D1 -->|"4xx (не 429)"| H["end_generation_with_error()"]
     H --> H1[/"raise LLMClientError<br/>HTTP error"/]
 
     D --> T{Timeout?}

@@ -1,27 +1,65 @@
 # C4 Context Diagram — Multi-Agent Interview Coach
 
-Диаграмма уровня Context показывает систему, пользователя и внешние сервисы с границами взаимодействия.
+Диаграмма уровня Context показывает систему как «чёрный ящик», пользователей и внешние зависимости.
+
+---
+
+## Диаграмма
 
 ```mermaid
-C4Context
-    title C4 Context — Multi-Agent Interview Coach
+flowchart TB
+    subgraph USERS["Пользователи"]
+        direction LR
+        candidate(["👤 Кандидат<br/>Разработчик, проходящий<br/>тренировочное техническое<br/>интервью через веб-интерфейс"])
+        operator(["🔧 Оператор<br/>Администратор: deploy,<br/>настройка .env, секреты,<br/>управление логами"])
+    end
 
-    Person(candidate, "Кандидат", "Разработчик, проходящий тренировочное техническое интервью через веб-интерфейс")
-    Person(operator, "Оператор", "Администратор, развёртывающий и настраивающий систему, управляющий секретами и логами")
+    subgraph SYSTEM["Multi-Agent Interview Coach"]
+        direction LR
+        coach["<b>Мультиагентная система</b><br/>технических интервью<br/><br/>• Адаптивная сложность<br/>• Факт-чекинг ответов<br/>• Структурированный фидбэк<br/>• Observability и логирование"]
+    end
 
-    System(interview_coach, "Multi-Agent Interview Coach", "Мультиагентная система проведения технических интервью с адаптивной сложностью, факт-чекингом и генерацией структурированного фидбэка")
+    subgraph EXTERNAL["Внешние системы (вне Docker Compose)"]
+        direction TB
+        litellm["<b>LiteLLM Proxy</b><br/><i>OpenAI-compatible API gateway</i><br/>маршрутизация · балансировка ·<br/>retry · cost tracking"]
+        llm_backends["<b>LLM Backends</b><br/>Ollama · vLLM (локальные)<br/>DeepSeek · OpenAI (облачные)"]
+    end
 
-    System_Ext(litellm_proxy, "LiteLLM Proxy", "OpenAI-compatible API gateway: маршрутизация запросов к LLM-бэкендам (локальные модели, DeepSeek, OpenAI), балансировка, retry, cost tracking")
-    System_Ext(llm_backend, "LLM Backend(s)", "Один или несколько LLM-провайдеров: локальные модели (Ollama, vLLM), облачные (DeepSeek API, OpenAI API)")
+    %% ── Пользователи → Система ──
+    candidate -->|"HTTPS / WebSocket (Gradio :7860)<br/>сообщения · настройки ·<br/>получение вопросов и фидбэка"| coach
+    operator -->|"SSH / CLI / Файловая система<br/>Docker Compose · .env ·<br/>просмотр логов"| coach
 
-    Rel(candidate, interview_coach, "Отправляет сообщения, получает вопросы и фидбэк", "HTTPS / WebSocket (Gradio)")
-    Rel(operator, interview_coach, "Настраивает .env, управляет Docker Compose, просматривает логи", "SSH / CLI / Файловая система")
+    %% ── Система → Внешние ──
+    coach -->|"HTTP (Bearer token)<br/>POST /v1/chat/completions<br/>GET /v1/models<br/>GET /health/readiness"| litellm
+    litellm -->|"HTTP / Provider-specific API<br/>маршрутизация к конкретной<br/>модели"| llm_backends
 
-    Rel(interview_coach, litellm_proxy, "Отправляет chat completion запросы, получает ответы LLM", "HTTP POST /v1/chat/completions, GET /v1/models, GET /health/readiness")
-    Rel(litellm_proxy, llm_backend, "Маршрутизирует запросы к конкретным моделям", "HTTP / Provider-specific API")
+    %% ── Стили узлов ──
+    classDef person fill:#6366f1,stroke:#4338ca,color:#fff,font-weight:bold
+    classDef sys fill:#059669,stroke:#047857,color:#fff,font-weight:bold
+    classDef ext fill:#d97706,stroke:#b45309,color:#fff
 
-    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="2")
+    class candidate,operator person
+    class coach sys
+    class litellm,llm_backends ext
+
+    %% ── Стили групп ──
+    style USERS fill:#1e1b4b,stroke:#6366f1,color:#c7d2fe
+    style SYSTEM fill:#022c22,stroke:#059669,color:#a7f3d0
+    style EXTERNAL fill:#451a03,stroke:#d97706,color:#fef3c7
 ```
+
+---
+
+## Как читать диаграмму
+
+| Символ | Значение |
+|---|---|
+| `───▶` сплошная линия | Взаимодействие с указанием протокола |
+| 🟣 фиолетовый | Пользователи (акторы) |
+| 🟢 зелёный | Система (чёрный ящик на уровне Context) |
+| 🟠 оранжевый | Внешние зависимости (вне Docker Compose) |
+
+---
 
 ## Описание границ
 
