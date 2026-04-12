@@ -152,6 +152,6 @@ Dataclass, агрегирующий:
 
 - `TokenUsage` (input/output/total/cost) по каждому агенту (observer, interviewer, evaluator) и суммарно.
 - `turn_count`, `generation_count`.
-- Вычисляемые: `avg_tokens_per_turn`, `avg_tokens_per_generation`, `cost_per_turn`, `total_cost`.
+- Вычисляемые (при записи в Langfuse): `avg_tokens_per_turn`, `session_cost_usd`.
 
 Метрики добавляются в Langfuse trace как span и scores при завершении сессии, а также записываются в детальный JSON-лог.

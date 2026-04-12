@@ -267,7 +267,7 @@ flowchart TB
 
 | Файл | Формат | Содержимое | Создаётся |
 |---|---|---|---|
-| `interview_log_*.json` | JSON (`InterviewLog`) | turns (agent_message, user_message, thoughts string), final_feedback (formatted string) | `generate_feedback()` |
+| `interview_log_*.json` | JSON (`InterviewLog`) | turns (agent_visible_message, user_message, thoughts string), final_feedback (formatted string) | `generate_feedback()` |
 | `interview_detailed_*.json` | JSON (dict) | candidate_info, interview_stats, turns (с timestamps и thoughts dict), final_feedback (model_dump), token_metrics | `generate_feedback()` |
 | `system.log` | Text | Системные события: LLM запросы, ошибки, изменения сложности, извлечение данных | Непрерывно, ротация |
 | `personal.log` | Text | Запросы привязанные к request_id (FastAPI backend) | Непрерывно, ротация |

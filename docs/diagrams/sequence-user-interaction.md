@@ -53,7 +53,7 @@ sequenceDiagram
     LLMClient -->> Interviewer: "Здравствуйте! Я ваш интервьюер..."
     Interviewer -->> Session: greeting_text
 
-    Session ->> Session: InterviewTurn(agent_message=greeting)
+    Session ->> Session: InterviewTurn(agent_visible_message=greeting)
     Session ->> Langfuse: add_span(name="greeting",<br/>output=greeting_text)
 
     Session -->> GradioUI: greeting_text
@@ -113,7 +113,7 @@ sequenceDiagram
 
     rect rgb(45, 30, 50)
         Note over Session: Stage 6 — Фиксация
-        Session ->> Session: increment_turn()<br/>_update_state_from_analysis()<br/>_last_agent_message = response<br/>Новый InterviewTurn(agent_message=response)
+        Session ->> Session: increment_turn()<br/>_update_state_from_analysis()<br/>_last_agent_message = response<br/>Новый InterviewTurn(agent_visible_message=response)
         Session ->> Langfuse: add_span(name="interviewer_response")
     end
 
