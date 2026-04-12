@@ -8,7 +8,6 @@ Gradio интерфейс для Multi-Agent Interview Coach.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from collections.abc import AsyncGenerator
@@ -33,32 +32,6 @@ logger: logging.LoggerAdapter[logging.Logger] = get_system_logger(__name__)
 _current_session: InterviewSession | None = None
 _last_log_path: Path | None = None
 _last_detailed_log_path: Path | None = None
-
-
-def _run_async(coro: Any) -> Any:
-    """
-    Выполняет корутину в синхронном контексте Gradio.
-
-    Используется только для обработчиков, которым требуется синхронный вызов
-    (например, ``start_interview``, ``reset_interview``).
-    Обработчики в горячем пути отправки сообщений объявлены как ``async def``
-    напрямую, чтобы не блокировать event loop Gradio.
-
-    :param coro: Корутина для выполнения.
-    :return: Результат выполнения корутины.
-    """
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    if loop.is_running():
-        import nest_asyncio
-
-        nest_asyncio.apply()
-
-    return loop.run_until_complete(coro)
 
 
 def _build_interview_config(
@@ -146,7 +119,7 @@ def _append_assistant_message(
     return updated_history
 
 
-async def _start_interview_async(
+async def start_interview(
     model: str,
     max_turns: int,
     job_description: str,
@@ -168,6 +141,20 @@ async def _start_interview_async(
     """
     Асинхронно начинает новое интервью.
 
+    Создаёт сессию и генерирует приветствие. Async-обработчик гарантирует,
+    что все asyncio-ресурсы (httpx.AsyncClient и его внутренние примитивы)
+    создаются в том же event loop, в котором они потом используются
+    обработчиками ``bot_respond`` и ``stop_interview``.
+
+    :param model: Имя модели LLM.
+    :param max_turns: Максимальное количество ходов.
+    :param job_description: Описание вакансии.
+    :param obs_temp: Температура Observer.
+    :param obs_tokens: Макс. токенов Observer.
+    :param int_temp: Температура Interviewer.
+    :param int_tokens: Макс. токенов Interviewer.
+    :param eval_temp: Температура Evaluator.
+    :param eval_tokens: Макс. токенов Evaluator.
     :return: Tuple (статус, msg_input, история чата, фидбэк, лог, детальный лог, send_btn).
     """
     global _current_session, _last_log_path, _last_detailed_log_path
@@ -195,6 +182,8 @@ async def _start_interview_async(
         greeting: str = await _current_session.start()
     except Exception as e:
         logger.error(f"Failed to start interview: {type(e).__name__}: {e}")
+        if _current_session is not None:
+            await _current_session.close()
         _current_session = None
         return (
             f"❌ Ошибка запуска интервью: {e}",
@@ -222,17 +211,15 @@ async def _start_interview_async(
     )
 
 
-def start_interview_prepare() -> (
-    tuple[
-        str,
-        dict[str, Any],
-        list[dict[str, str | None]],
-        str,
-        None,
-        None,
-        dict[str, Any],
-    ]
-):
+def start_interview_prepare() -> tuple[
+    str,
+    dict[str, Any],
+    list[dict[str, str | None]],
+    str,
+    None,
+    None,
+    dict[str, Any],
+]:
     """
     Мгновенно обновляет UI при нажатии «Начать интервью».
 
@@ -249,41 +236,6 @@ def start_interview_prepare() -> (
         None,
         None,
         send_btn_disabled,
-    )
-
-
-def start_interview(
-    model: str,
-    max_turns: int,
-    job_description: str,
-    obs_temp: float,
-    obs_tokens: int,
-    int_temp: float,
-    int_tokens: int,
-    eval_temp: float,
-    eval_tokens: int,
-) -> tuple[
-    str,
-    dict[str, Any],
-    list[dict[str, str | None]],
-    str,
-    str | None,
-    str | None,
-    dict[str, Any],
-]:
-    """Синхронная обёртка для старта интервью."""
-    return _run_async(  # type: ignore[no-any-return]
-        _start_interview_async(
-            model,
-            max_turns,
-            job_description,
-            obs_temp,
-            obs_tokens,
-            int_temp,
-            int_tokens,
-            eval_temp,
-            eval_tokens,
-        )
     )
 
 

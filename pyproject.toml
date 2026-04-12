@@ -21,7 +21,6 @@ python-multipart = ">=0.0.22"
 python-docx = "1.2.0"
 redis = "^5.3.0"
 gradio = "^5.0"
-nest-asyncio = "^1.6.0"
 langfuse = "^2.0"
 
 [tool.poetry.group.dev.dependencies]
