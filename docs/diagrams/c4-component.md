@@ -44,7 +44,7 @@ flowchart TB
     %% ── Конфигурация ──
     subgraph cfg[" Конфигурация "]
         direction LR
-        config["<b>Settings</b><br/>9 групп настроек,<br/>Pydantic Settings"]
+        config["<b>Settings</b><br/>10 групп настроек,<br/>Pydantic Settings"]
         schemas["<b>Schemas</b><br/>InterviewTurn, ObserverAnalysis,<br/>InterviewFeedback, enums"]
     end
 

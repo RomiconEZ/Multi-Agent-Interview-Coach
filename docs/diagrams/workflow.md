@@ -91,7 +91,7 @@ flowchart TD
     B --> B1["_build_evaluation_context():<br/>candidate_info + conversation +<br/>skills_summary + job_description"]
     B1 --> B2["LLMClient.complete()<br/>generation_name=evaluator_feedback"]
     B2 --> B3{JSON парсинг<br/>успешен?}
-    B3 -->|Нет| B4{attempt <<br/>generation_retries?}
+    B3 -->|Нет| B4{"attempt &lt;<br/>generation_retries?"}
     B4 -->|Да| B2
     B4 -->|Нет| B5[/"raise ValueError<br/>или LLMClientError"/]
     B5 --> ERR([Ошибка → UI])
@@ -117,7 +117,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A([Пользователь нажимает<br/>Начать интервью]) --> B["_start_interview_async()"]
+    A([Пользователь нажимает<br/>Начать интервью]) --> B["start_interview()"]
     B --> B0["Закрыть предыдущую<br/>сессию если есть"]
     B0 --> C["create_interview_session(config)"]
     C --> C1["create_llm_client(model)"]
@@ -164,7 +164,7 @@ flowchart TD
     G3 --> G4["_parse_extracted_info()"]
     G4 --> H(["return ObserverAnalysis"])
 
-    F1 -->|Нет| I{attempt <<br/>generation_retries?}
+    F1 -->|Нет| I{"attempt &lt;<br/>generation_retries?"}
     I -->|Да| J["attempt += 1<br/>log warning"]
     J --> E
     I -->|Нет| K[/"raise last_error"/]
@@ -197,7 +197,7 @@ flowchart TD
     E2 --> E3["circuit_breaker.record_success()"]
     E3 --> F(["return content"])
 
-    D1 -->|429, 5xx| G{attempt <<br/>max_retries?}
+    D1 -->|429, 5xx| G{"attempt &lt;<br/>max_retries?"}
     G -->|Да| G1["delay = base × 2^attempt<br/>(capped at max)"]
     G1 --> G2["await sleep(delay)"]
     G2 --> G3["attempt += 1"]
@@ -209,12 +209,12 @@ flowchart TD
     H --> H1[/"raise LLMClientError<br/>HTTP error"/]
 
     D --> T{Timeout?}
-    T -->|Да| T1{attempt <<br/>max_retries?}
+    T -->|Да| T1{"attempt &lt;<br/>max_retries?"}
     T1 -->|Да| G1
     T1 -->|Нет| G4
 
     D --> R{RequestError?}
-    R -->|Да| R1{attempt <<br/>max_retries?}
+    R -->|Да| R1{"attempt &lt;<br/>max_retries?"}
     R1 -->|Да| G1
     R1 -->|Нет| G4
 

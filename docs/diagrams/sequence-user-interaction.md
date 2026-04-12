@@ -21,10 +21,10 @@ sequenceDiagram
     Note over User, Langfuse: Фаза 1 — Запуск и конфигурация
 
     User ->> GradioUI: Открывает http://localhost:7860
-    GradioUI ->> LLMClient: fetch_available_models_sync()<br/>GET /v1/models
-    LLMClient ->> LiteLLM: GET /v1/models
-    LiteLLM -->> LLMClient: {"data": [{"id": "local_llm"}, ...]}
-    LLMClient -->> GradioUI: ["local_llm", "cloud/deepseek-chat", ...]
+    GradioUI ->> GradioUI: get_models_for_ui()<br/>→ fetch_available_models_sync()
+    GradioUI ->> LiteLLM: GET /v1/models (httpx)
+    LiteLLM -->> GradioUI: {"data": [{"id": "local_llm"}, ...]}
+    GradioUI ->> GradioUI: Сортировка и фильтрация моделей
     GradioUI -->> User: UI с dropdown моделей,<br/>слайдерами температуры, max_turns
 
     User ->> GradioUI: Выбирает модель, temperature,<br/>max_turns, вводит job description
@@ -32,7 +32,7 @@ sequenceDiagram
     Note over User, Langfuse: Фаза 2 — Старт сессии
 
     User ->> GradioUI: Нажимает «Начать интервью»
-    GradioUI ->> GradioUI: _start_interview_async()
+    GradioUI ->> GradioUI: start_interview()
     GradioUI ->> GradioUI: Закрыть предыдущую сессию (если есть)
     GradioUI ->> Session: create_interview_session(config)
 

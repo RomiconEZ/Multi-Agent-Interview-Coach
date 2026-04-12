@@ -30,7 +30,7 @@ C4Container
 
         Container(interview_logger, "InterviewLogger", "Python", "Сохранение основного и детального JSON-логов интервью на файловую систему.")
 
-        Container(config, "Settings", "Python, pydantic-settings", "Централизованная конфигурация из .env: 9 групп настроек с валидацией.")
+        Container(config, "Settings", "Python, pydantic-settings", "Централизованная конфигурация из .env: 10 групп настроек с валидацией.")
 
         Container(fastapi_backend, "FastAPI Backend", "Python, FastAPI, Gunicorn+Uvicorn", "REST API, middleware (Cache-Control), документация (/docs, /redoc). Lifespan: Redis pool, Langfuse shutdown.")
 

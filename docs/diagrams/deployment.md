@@ -10,6 +10,7 @@
 flowchart TB
     subgraph EXTERNAL["🌐 Внешний доступ"]
         Browser["Браузер пользователя"]
+        LiteLLMProxy["LiteLLM Proxy<br/>(OpenAI-compatible API)"]
         LLMBackend["LLM Backend<br/>(Ollama / DeepSeek API /<br/>другой провайдер)"]
     end
 
@@ -51,7 +52,8 @@ flowchart TB
     FastAPI -->|"TCP :6379<br/>(REDIS_CACHE_PORT, internal)"| Redis
     FastAPI -.->|"HTTP (Langfuse SDK)"| LangfuseServer
     GradioApp -.->|"HTTP (Langfuse SDK)"| LangfuseServer
-    GradioApp -->|"HTTP<br/>POST /v1/chat/completions<br/>GET /v1/models<br/>GET /health/readiness"| LLMBackend
+    GradioApp -->|"HTTP<br/>POST /v1/chat/completions<br/>GET /v1/models<br/>GET /health/readiness"| LiteLLMProxy
+    LiteLLMProxy -->|"HTTP<br/>Provider-specific API"| LLMBackend
     LangfuseServer -->|"TCP :5432<br/>(internal)"| Postgres
 
     %% Стили
@@ -117,7 +119,7 @@ flowchart LR
 | `interview-logs` | Docker named volume | `interview-coach` | `/code/interview_logs` | Логи интервью: `interview_log_*.json`, `interview_detailed_*.json` |
 | `langfuse-db-data` | Docker named volume | `langfuse-db` | `/var/lib/postgresql/data` | Данные PostgreSQL (трейсы, генерации, span'ы, score'ы Langfuse) |
 | `./src/app` (bind) | Bind mount | `interview-coach`, `backend` | `/code/app` | Исходный код (dev-режим — hot reload) |
-| `./.env` (bind) | Bind mount | `interview-coach`, `backend` | `/code/.env` | Конфигурация окружения |
+| `.env` (env_file) | Docker env_file | `interview-coach`, `backend` | — (переменные окружения) | Конфигурация окружения: значения из файла передаются как ENV-переменные контейнера |
 | `./default.conf` (bind) | Bind mount | `nginx` | `/etc/nginx/conf.d/default.conf` | Конфигурация Nginx reverse proxy |
 
 ### Схема volume mounts
@@ -126,7 +128,6 @@ flowchart LR
 flowchart LR
     subgraph HOST["Хост-система (файловая система)"]
         SRC["./src/app<br/>(исходный код)"]
-        ENV["./.env<br/>(конфигурация)"]
         NGCONF["./default.conf<br/>(nginx config)"]
     end
 
@@ -146,8 +147,6 @@ flowchart LR
 
     SRC -->|bind| C_GRADIO
     SRC -->|bind| C_BACKEND
-    ENV -->|bind| C_GRADIO
-    ENV -->|bind| C_BACKEND
     NGCONF -->|bind| C_NGINX
 
     V_LOGS -->|named| C_GRADIO
@@ -176,6 +175,7 @@ flowchart BT
 
     langfuse_db -->|"condition:<br/>service_healthy"| langfuse
     langfuse -->|"condition:<br/>service_started"| gradio
+    redis -->|"condition:<br/>service_started"| gradio
     redis -->|"depends_on"| backend
     langfuse -->|"depends_on"| backend
     backend -->|"depends_on"| nginx
@@ -196,7 +196,7 @@ flowchart BT
 | 1 | `redis_cache` | Немедленно | — |
 | 2 | `langfuse` | `langfuse-db` healthy (`pg_isready` — interval: 5s, timeout: 5s, retries: 5) | `langfuse-db` |
 | 3 | `backend` | `redis_cache` started, `langfuse` started | `redis_cache`, `langfuse` |
-| 3 | `interview-coach` | `langfuse` started | `langfuse` |
+| 3 | `interview-coach` | `redis_cache` started, `langfuse` started | `redis_cache`, `langfuse` |
 | 4 | `nginx` | `backend` started | `backend` |
 
 ### 4.3 Health checks

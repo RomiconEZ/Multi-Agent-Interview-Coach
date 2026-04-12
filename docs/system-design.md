@@ -94,7 +94,7 @@ Langfuse (self-hosted) интегрирован на уровне каждого
 
 | Модуль | Путь | Роль |
 |---|---|---|
-| **Config** | `src/app/core/config.py` | Pydantic-settings: 9 групп настроек, валидация, computed fields. |
+| **Config** | `src/app/core/config.py` | Pydantic-settings: 10 групп настроек, валидация, computed fields. |
 | **LoggerSetup** | `src/app/core/logger_setup.py` | TZ-aware форматтеры, system/personal фильтры, RotatingFileHandler. |
 | **Setup** | `src/app/core/setup.py` | FastAPI factory: lifespan (Redis, Langfuse, threadpool), middleware, docs router. |
 | **Constants** | `src/app/core/constants.py` | `SENSITIVE_KEYS`, `REQUEST_ID_PATTERN`. |
@@ -123,7 +123,7 @@ Langfuse (self-hosted) интегрирован на уровне каждого
 
 ```text
 User → [Нажать «Начать интервью»]
-  → Gradio UI: _start_interview_async()
+  → Gradio UI: start_interview()
     → create_interview_session(config)
       → create_llm_client(model)
       → create_interview_logger()

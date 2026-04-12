@@ -45,7 +45,7 @@ LLM generation, ошибок и метрик токенов.
 
 Ключевые функции:
 
-- `_start_interview_async()` / `start_interview()`: создание сессии, генерация приветствия.
+- `start_interview()`: создание сессии, генерация приветствия.
 - `add_user_message()`: мгновенное обновление UI (шаг 1).
 - `bot_respond()`: async generator, обработка через LLM (шаг 2).
 - `stop_interview()`: async generator, принудительная остановка и генерация фидбэка.

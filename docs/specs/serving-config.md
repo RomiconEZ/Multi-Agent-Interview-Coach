@@ -21,7 +21,7 @@
 
 ### 2.1 Файл: `src/app/core/config.py`
 
-Единая точка конфигурации. Все настройки объединены в класс `Settings`, наследующий от 9 групп:
+Единая точка конфигурации. Все настройки объединены в класс `Settings`, наследующий от 10 групп:
 
 | Группа | Класс | Ключевые параметры |
 |---|---|---|
@@ -33,6 +33,7 @@
 | LiteLLM | `LiteLLMSettings` | `LITELLM_BASE_URL`, `LITELLM_API_KEY`, `LITELLM_MODEL`, `LITELLM_TIMEOUT` (120s), `LITELLM_MAX_RETRIES` (3), `LITELLM_RETRY_BACKOFF_BASE` (0.5), `LITELLM_RETRY_BACKOFF_MAX` (30.0), `LITELLM_MODELS_FETCH_TIMEOUT` (10.0), `LITELLM_HEALTH_CHECK_TIMEOUT` (5.0), `LITELLM_CIRCUIT_BREAKER_THRESHOLD` (5), `LITELLM_CIRCUIT_BREAKER_RECOVERY` (60.0) |
 | Интервью | `InterviewSettings` | `INTERVIEW_LOG_DIR`, `TEAM_NAME`, `MAX_TURNS` (20), `HISTORY_WINDOW_TURNS` (10), `GREETING_MAX_TOKENS` (300) |
 | Langfuse | `LangfuseSettings` | `LANGFUSE_ENABLED` (true), `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` |
+| LLM Cache | `LLMCacheSettings` | `LLM_CACHE_ENABLED` (false), `LLM_CACHE_TTL_SECONDS` (3600) |
 | Gradio UI | `GradioUISettings` | Layout params (`UI_CHAT_HEIGHT`, `UI_MSG_INPUT_LINES`, etc.), slider ranges, agent defaults (`UI_OBSERVER_DEFAULT_TEMP`, etc.) |
 
 ### 2.2 Валидация
