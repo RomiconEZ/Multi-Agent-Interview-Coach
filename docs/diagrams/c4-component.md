@@ -29,6 +29,7 @@ flowchart TB
     subgraph llm[" LLM-инфраструктура "]
         direction LR
         llm_client["<b>LLMClient</b><br/>HTTP-клиент к LiteLLM:<br/>retry, backoff, cost extraction"]
+        cache["<b>LLMCacheBackend</b><br/>RedisLLMCache / NullLLMCache<br/>SHA-256 key, TTL, graceful degradation"]
         circuit_breaker["<b>CircuitBreaker</b><br/>CLOSED → OPEN → HALF_OPEN<br/>threshold: 5, recovery: 60s"]
         response_parser["<b>ResponseParser</b><br/>JSON: r-tag → result-tag →<br/>markdown → raw JSON"]
     end
@@ -61,7 +62,8 @@ flowchart TB
 
     %% ── Связи: LLM вызовы ──
     session -.->|"health · set_trace · close"| llm_client
-    base_agent -->|"provides _llm_client"| llm_client
+    base_agent -->|"calls complete() via _llm_client"| llm_client
+    llm_client -->|"get · set (before/after HTTP)"| cache
     llm_client -->|"check · record"| circuit_breaker
     observer & evaluator -->|"extract_json()"| response_parser
 
@@ -84,7 +86,7 @@ flowchart TB
 
     class session,state orch
     class observer,interviewer,evaluator,base_agent,prompts agent
-    class llm_client,circuit_breaker,response_parser llmStyle
+    class llm_client,cache,circuit_breaker,response_parser llmStyle
     class langfuse,metrics,logger obsStyle
     class config,schemas cfgStyle
 ```
@@ -123,6 +125,7 @@ flowchart TB
 - `complete()` — текстовый запрос с retry и backoff.
 - `complete_json()` — JSON-запрос с fallback на текстовый режим при HTTP 400.
 - `check_health()` — проверка `/health/readiness` перед стартом сессии.
+- `_cache` — `LLMCacheBackend` (Redis или NullCache): проверка кэша перед HTTP-запросом, запись после успешного ответа. При попадании — LiteLLM не вызывается (cost=0).
 - Интегрирован с `CircuitBreaker` для защиты от каскадных сбоев.
 - Создаёт Langfuse `generation` на каждый вызов.
 

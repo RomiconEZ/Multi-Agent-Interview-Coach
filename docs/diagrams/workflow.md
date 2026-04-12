@@ -183,7 +183,10 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A(["LLMClient.complete()"]) --> B["circuit_breaker.check()"]
+    A(["LLMClient.complete()"]) --> A1["compute_cache_key()<br/>SHA-256(model, messages,<br/>temperature, max_tokens, json_mode)"]
+    A1 --> A2{"Cache hit?"}
+    A2 -->|"Да"| A3(["return cached response<br/>(cost=0, Langfuse: cached=true)"])
+    A2 -->|"Нет"| B["circuit_breaker.check()"]
     B --> B1{OPEN?}
     B1 -->|Да| B2[/"raise CircuitBreakerOpen"/]
     B1 -->|Нет| C["attempt = 0"]
@@ -195,14 +198,15 @@ flowchart TD
     E --> E1["Extract content, usage, cost"]
     E1 --> E2["LangfuseTracker.end_generation()"]
     E2 --> E3["circuit_breaker.record_success()"]
-    E3 --> F(["return content"])
+    E3 --> E4["cache.set(key, content, TTL)"]
+    E4 --> F(["return content"])
 
-    D1 -->|429, 5xx| G{"attempt &lt;<br/>max_retries?"}
+    D1 -->|429, 500-504| G{"attempt &lt;<br/>max_retries?"}
     G -->|Да| G1["delay = base × 2^attempt<br/>(capped at max)"]
     G1 --> G2["await sleep(delay)"]
     G2 --> G3["attempt += 1"]
     G3 --> D
-    G -->|Нет| G4["circuit_breaker.record_failure()"]
+    G -->|Нет| G4["circuit_breaker.record_failure()<br/><i>(только 500–504, timeout,<br/>request error; НЕ 429)</i>"]
     G4 --> G5[/"raise LLMClientError<br/>Max retries exceeded"/]
 
     D1 -->|4xx (не 429)| H["end_generation_with_error()"]
@@ -221,16 +225,17 @@ flowchart TD
     style B2 fill:#e53e3e,stroke:#c53030,color:#fff
     style G5 fill:#e53e3e,stroke:#c53030,color:#fff
     style H1 fill:#e53e3e,stroke:#c53030,color:#fff
+    style A3 fill:#38a169,stroke:#276749,color:#fff
     style F fill:#38a169,stroke:#276749,color:#fff
 ```
 
 ---
 
-## 6. Workflow адаптации сложности (Difficulty Adaptation)
+## 6. Workflow адаптации сложности (комбинированный поток)
 
 ```mermaid
 flowchart TD
-    A(["adjust_difficulty(analysis)"]) --> B{answered_last_question?}
+    A(["Адаптация сложности<br/>(Observer → Session → State)"]) --> B{answered_last_question?}
     B -->|Нет| B1["should_simplify = false<br/>should_increase = false<br/><i>Инвариант: нельзя менять<br/>сложность без ответа</i>"]
     B1 --> Z([Без изменений])
 

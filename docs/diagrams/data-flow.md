@@ -44,7 +44,7 @@ flowchart LR
     OBS -->|"generation + span"| LF
     LLM -->|"usage, cost"| SM
 
-    UPD -->|"candidate_info,<br/>difficulty"| IS
+    UPD -->|"candidate_info, difficulty,<br/>topics, skills, gaps<br/>(Stage 2 + Stage 6)"| IS
     UPD --> INT
     IS --> INT
     INT -->|"LLM call #2"| LLM
@@ -53,7 +53,7 @@ flowchart LR
     LLM -->|"usage, cost"| SM
 
     INT -->|"response_text"| RESP
-    INT -->|"thoughts, topics,<br/>skills, gaps"| IS
+    INT -->|"thoughts"| IS
     INT -->|"response"| LAM
     RESP --> UI
 
@@ -97,6 +97,10 @@ flowchart TB
         D7["correct_answer: str | None"]
         D8["should_simplify / should_increase_difficulty"]
         D9["thoughts: list[InternalThought]"]
+        D10["is_factually_correct: bool"]
+        D11["detected_topics: list[str]"]
+        D12["recommendation: str"]
+        D13["demonstrated_level: str | None"]
     end
 
     A1 --> B1
@@ -115,6 +119,10 @@ flowchart TB
     D1 --- D7
     D1 --- D8
     D1 --- D9
+    D1 --- D10
+    D1 --- D11
+    D1 --- D12
+    D1 --- D13
 ```
 
 ---
@@ -228,7 +236,7 @@ flowchart TB
     end
 
     subgraph EXTERNAL_STORES["Внешние хранилища"]
-        RD["Redis<br/>(FastAPI кэш)"]
+        RD["Redis<br/>(LLM response cache +<br/>FastAPI app cache)"]
         PG["PostgreSQL<br/>(Langfuse данные)"]
     end
 
@@ -262,6 +270,9 @@ flowchart TB
 | `knowledge_gaps` | `list[dict]` | Stage 6 (при успехе) | Да, в detailed log |
 | `covered_topics` | `list[str]` | Stage 6 (при успехе) | Да, в detailed log |
 | `consecutive_good/bad_answers` | `int` | Stage 4 (с откатом) | Нет |
+| `job_description` | `str \| None` | Конструктор (при start) | Да, в detailed log |
+| `current_turn` | `int` | Stage 6 (add_turn) | Да, в detailed log |
+| `is_active` | `bool` | Stage 3 / MAX_TURNS | Да, в detailed log |
 
 ### 6.2 Файловая система
 
