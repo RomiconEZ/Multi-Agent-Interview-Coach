@@ -36,7 +36,7 @@ flowchart TD
     J --> K{{"Stage 3: Стоп-команда?"}}
     K --> K1{response_type ==<br/>STOP_COMMAND?}
     K1 -->|Да| K2["is_active = False"]
-    K2 --> K3(["→ generate_feedback()"])
+    K2 --> K3(["return (response, is_finished=True)<br/>→ bot_respond() вызовет generate_feedback()"])
 
     K1 -->|Нет| L{{"Stage 4: Корректировка<br/>сложности"}}
     L --> L0["Snapshot:<br/>saved_difficulty<br/>saved_good_streak<br/>saved_bad_streak"]
@@ -54,7 +54,7 @@ flowchart TD
     N4 --> Z1
 
     N2 -->|Да| O{{"Stage 6: Фиксация"}}
-    O --> O1["increment_turn()"]
+    O --> O1["langfuse.increment_turn()<br/><i>(метрики, не state.current_turn)</i>"]
     O1 --> O2["_update_state_from_analysis()<br/>→ covered_topics<br/>→ confirmed_skills<br/>→ knowledge_gaps"]
     O2 --> O3["_last_agent_message = response"]
     O3 --> O4["Записать thoughts<br/>в последний turn"]
@@ -63,8 +63,8 @@ flowchart TD
 
     O6 --> P{current_turn ≥<br/>MAX_TURNS?}
     P -->|Да| P1["is_active = False"]
-    P1 --> P2(["→ generate_feedback()"])
-    P -->|Нет| Q(["yield response<br/>Разблокировать ввод"])
+    P1 --> P2(["return (response, is_finished=True)<br/>→ bot_respond() вызовет generate_feedback()"])
+    P -->|Нет| Q(["return (response, is_finished=False)<br/>→ yield response, разблокировать ввод"])
 
     style G fill:#4a5568,stroke:#a0aec0,color:#fff
     style I fill:#4a5568,stroke:#a0aec0,color:#fff
@@ -89,7 +89,8 @@ flowchart TD
 
     A --> B["EvaluatorAgent.process(state)"]
     B --> B1["_build_evaluation_context():<br/>candidate_info + conversation +<br/>skills_summary + job_description"]
-    B1 --> B2["LLMClient.complete()<br/>generation_name=evaluator_feedback"]
+    B1 --> B1a["_build_messages()<br/>system_prompt + context"]
+    B1a --> B2["LLMClient.complete()<br/>generation_name=evaluator_feedback"]
     B2 --> B3{JSON парсинг<br/>успешен?}
     B3 -->|Нет| B4{"attempt &lt;<br/>generation_retries?"}
     B4 -->|Да| B2
@@ -135,8 +136,10 @@ flowchart TD
     H --> I["LLMClient.set_trace()"]
     I --> J["InterviewerAgent.generate_greeting()"]
     J --> J1["LLMClient.complete()<br/>generation_name=<br/>interviewer_greeting"]
-    J1 --> K["InterviewTurn(greeting)"]
-    K --> L["LangfuseTracker.add_span<br/>name=greeting"]
+    J1 --> J2["_last_agent_message = greeting"]
+    J2 --> K["InterviewTurn(greeting)"]
+    K --> K1["state.add_turn(turn)<br/><i>current_turn += 1</i>"]
+    K1 --> L["LangfuseTracker.add_span<br/>name=greeting"]
     L --> M(["return greeting<br/>✅ Интервью начато"])
 
     style E2 fill:#e53e3e,stroke:#c53030,color:#fff
@@ -189,7 +192,8 @@ flowchart TD
     A2 -->|"Нет"| B["circuit_breaker.check()"]
     B --> B1{OPEN?}
     B1 -->|Да| B2[/"raise CircuitBreakerOpen"/]
-    B1 -->|Нет| C["attempt = 0"]
+    B1 -->|Нет| B3["langfuse.create_generation()<br/><i>(до retry loop)</i>"]
+    B3 --> C["attempt = 0"]
 
     C --> D["POST /v1/chat/completions"]
     D --> D1{HTTP Status?}
